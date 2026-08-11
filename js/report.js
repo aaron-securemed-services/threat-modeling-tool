@@ -27,6 +27,21 @@ window.TM = window.TM || {};
     return '<span class="stride-tag" title="' + esc(TM.STRIDE[c].name) + '">' + c + '</span>';
   }
   function typeLabel(t) { return TM.TYPES[t] ? TM.TYPES[t].label : t; }
+
+  /** The safety-function chips for an element, or a dash. */
+  function safetyFlags(el) {
+    var fns = TM.safetyFunctionsOf(el);
+    if (!fns.length) return '<span class="muted">—</span>';
+    return fns.map(function (k) {
+      var def = TM.safetyFunction(k);
+      return '<span class="safety-flag" title="' + esc(def.label) + '">' + esc(def.short) + '</span>';
+    }).join(' ');
+  }
+  function safetyFlagsText(el) {
+    var fns = TM.safetyFunctionsOf(el);
+    if (!fns.length) return '';
+    return fns.map(function (k) { return TM.safetyFunction(k).short; }).join('; ');
+  }
   function dash(v) { return TM.isUnset(v) ? '<span class="muted">not set</span>' : esc(v); }
   function plain(v) { return TM.isUnset(v) ? 'not set' : String(v); }
 
@@ -52,6 +67,13 @@ window.TM = window.TM || {};
     if (meta.date) out.push('<dt>Date</dt><dd>' + esc(meta.date) + '</dd>');
     if (meta.scope) out.push('<dt>Scope / assumptions</dt><dd>' + esc(meta.scope) + '</dd>');
     out.push('<dt>Methodology</dt><dd>STRIDE per element (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege)</dd>');
+    if (meta.intendedUse) out.push('<dt>Intended use</dt><dd>' + esc(meta.intendedUse) + '</dd>');
+    if (meta.safetyDoc || meta.safetyDocRef) {
+      out.push('<dt>Safety risk management file</dt><dd>' +
+        esc(meta.safetyDoc || 'Not named') +
+        (meta.safetyDocRef ? ' <span class="muted">(' + esc(meta.safetyDocRef) + ')</span>' : '') +
+        '</dd>');
+    }
     out.push('<dt>Severity scale</dt><dd>' + esc(a.profile.name) +
       (a.stats.scored
         ? ' · ' + a.stats.scored + ' of ' + a.stats.total + ' ' +
@@ -89,6 +111,27 @@ window.TM = window.TM || {};
           : '.') + '</p>');
     }
 
+    if (a.stats.safety) {
+      out.push('<p class="safety-callout"><b>' + a.stats.safety + ' of these ' +
+        noun(a.stats.total, 'threat', 'threats') + ' can affect patient safety</b>, across ' +
+        pl(a.stats.safetyElements, 'element', 'elements') +
+        ' with a safety-relevant function. They are listed with their hazard, harm and safety file ' +
+        'reference in section 4, and traced in section 5.</p>');
+      out.push('<table><thead><tr><th>Safety impact</th><th>What a compromise does to the patient</th>' +
+        '<th class="num">Threats</th></tr></thead><tbody>');
+      TM.SAFETY_FUNCTIONS.forEach(function (fn) {
+        var n = a.stats.bySafetyFunction[fn.key] || 0;
+        if (!n) return;
+        out.push('<tr><td><span class="safety-flag">' + esc(fn.short) + '</span> ' + esc(fn.label) +
+          '</td><td>' + esc(fn.harm) + '</td><td class="num">' + n + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+    } else if (a.stats.safetyElements === 0) {
+      out.push('<p class="muted">No element on this diagram has been marked as safety-relevant. If this is a ' +
+        'medical device, that is itself a finding: work through each element and record whether it can control ' +
+        'the device, raise alarms, or implement a safety stop.</p>');
+    }
+
     out.push('<table><thead><tr><th>STRIDE category</th><th>Security property</th><th class="num">Threats</th></tr></thead><tbody>');
     TM.STRIDE_ORDER.forEach(function (c) {
       var s = TM.STRIDE[c];
@@ -119,11 +162,13 @@ window.TM = window.TM || {};
     var nodes = model.nodes.filter(function (n) { return n.type !== 'boundary'; });
     if (nodes.length) {
       out.push('<h3>2.2 Elements</h3><table><thead><tr><th>Element</th><th>Type</th><th>Description</th>' +
-        '<th>Classification</th><th>In boundary</th><th>Asset</th></tr></thead><tbody>');
+        '<th>Classification</th><th>Safety impact</th><th>Severity of harm</th><th>In boundary</th>' +
+        '<th>Asset</th></tr></thead><tbody>');
       nodes.forEach(function (n) {
         var inB = TM.boundariesContaining(model, n).map(TM.label).join(', ');
         out.push('<tr><td><b>' + esc(TM.label(n)) + '</b></td><td>' + typeLabel(n.type) + '</td><td>' +
           dash(n.description) + '</td><td>' + dash(n.props.dataClassification) + '</td><td>' +
+          safetyFlags(n) + '</td><td>' + dash(n.props.harmSeverity) + '</td><td>' +
           (inB ? esc(inB) : '<span class="muted">—</span>') + '</td><td class="num">' +
           (n.isAsset || n.type === 'asset' ? '▲' : '') + '</td></tr>');
       });
@@ -183,9 +228,12 @@ window.TM = window.TM || {};
         list.forEach(function (f) {
           out.push('<div class="finding" style="border-left-color:' + esc(f.severity.color) + '">');
           out.push('<div class="finding-head">' + catTag(f.category) + ' <strong>' + esc(f.ref) + ' · ' +
-            esc(f.title) + '</strong> ' + sevPill(f.severity) + ' ' + sevNote(f.severity) +
+            esc(f.title) + '</strong> ' + sevPill(f.severity) + ' ' +
+            (f.safety ? '<span class="safety-flag">Patient safety · ' + esc(f.safety.fnShort) + '</span> ' : '') +
+            sevNote(f.severity) +
             ' <span class="muted">' + esc(TM.STRIDE[f.category].name) + ' — ' + esc(TM.STRIDE[f.category].property) + '</span></div>');
           out.push('<div>' + esc(f.threat) + '</div>');
+          if (f.safety) out.push(safetyPanel(f));
           if (f.via) out.push('<div class="muted">Via data flow: ' + esc(f.via) + '</div>');
           if (f.crossings && f.crossings.length) {
             out.push('<div class="muted">Crosses: ' + esc(f.crossings.join(', ')) + '</div>');
@@ -201,8 +249,85 @@ window.TM = window.TM || {};
       });
     }
 
+    /* ---- patient safety traceability ---- */
+    out.push('<h2>5. Patient safety traceability</h2>');
+    if (!a.safetyTrace.length) {
+      out.push('<p>No element on this diagram carries a safety-relevant function, so there is nothing to trace ' +
+        'to a safety risk management file. For a medical device, revisit this: mark every element that controls ' +
+        'the device, produces clinical data, raises alarms, implements a safety stop, or is needed for timely care.</p>');
+    } else {
+      out.push('<p>Each row is a security threat with a credible path to patient harm. Carry the hazard reference ' +
+        'into the safety risk management file' +
+        (meta.safetyDoc ? ' (<b>' + esc(meta.safetyDoc) + '</b>' + (meta.safetyDocRef ? ', ' + esc(meta.safetyDocRef) : '') + ')' : '') +
+        ' so the security control and the safety risk control are the same decision, evaluated once. ' +
+        'Rows without a safety file reference are breaks in the trace and need closing.</p>');
+
+      out.push('<table><thead><tr><th>Hazard ref</th><th>Threat</th><th>Element</th><th>STRIDE</th>' +
+        '<th>Safety impact</th><th>Hazardous situation → harm</th><th>Severity of harm</th>' +
+        '<th>Severity</th><th>Safety file ref</th></tr></thead><tbody>');
+      a.safetyTrace.forEach(function (row) {
+        if (!row.findings.length) return;
+        row.findings.forEach(function (f) {
+          out.push('<tr>' +
+            '<td><b>' + esc(f.safety.hazardRef) + '</b></td>' +
+            '<td>' + esc(f.ref) + '</td>' +
+            '<td>' + esc(row.label) + ' <span class="muted">(' + typeLabel(row.type) + ')</span></td>' +
+            '<td>' + catTag(f.category) + '</td>' +
+            '<td>' + esc(TM.safetyFunction(f.safety.fn).short) + '</td>' +
+            '<td>' + esc(f.title) + ' → ' + esc(f.safety.harm) + '</td>' +
+            '<td>' + dash(row.severityOfHarm) + '</td>' +
+            '<td>' + sevPill(f.severity) + '</td>' +
+            '<td>' + (row.fileRef
+              ? esc(row.fileRef)
+              : '<span class="missing-trace">missing</span>') + '</td>' +
+            '</tr>');
+        });
+      });
+      out.push('</tbody></table>');
+
+      var clean = a.safetyTrace.filter(function (r) { return !r.findings.length; });
+      if (clean.length) {
+        out.push('<h3>5.1 Safety-relevant elements with no threat raised</h3>');
+        out.push('<p class="muted">These elements can reach the patient but no rule fired against them. That is a ' +
+          'result, not an absence of one: record it in the safety file as a justified residual risk, with the ' +
+          'controls that make it so.</p>');
+        out.push('<table><thead><tr><th>Element</th><th>Safety functions</th><th>Severity of harm</th>' +
+          '<th>Controls in place</th><th>Safety file ref</th></tr></thead><tbody>');
+        clean.forEach(function (row) {
+          out.push('<tr><td><b>' + esc(row.label) + '</b> <span class="muted">(' + typeLabel(row.type) + ')</span></td>' +
+            '<td>' + row.functions.map(function (k) {
+              return '<span class="safety-flag">' + esc(TM.safetyFunction(k).short) + '</span>';
+            }).join(' ') + '</td>' +
+            '<td>' + dash(row.severityOfHarm) + '</td>' +
+            '<td>' + (row.existingControls ? esc(row.existingControls) : '<span class="muted">none recorded</span>') + '</td>' +
+            '<td>' + (row.fileRef ? esc(row.fileRef) : '<span class="missing-trace">missing</span>') + '</td></tr>');
+        });
+        out.push('</tbody></table>');
+      }
+
+      if (a.safetyGaps.length) {
+        out.push('<h3>5.2 Breaks in the safety trace</h3>');
+        out.push('<table><thead><tr><th>Element</th><th>Type</th><th>What is missing</th></tr></thead><tbody>');
+        a.safetyGaps.forEach(function (g) {
+          out.push('<tr><td>' + esc(g.label) + '</td><td>' + typeLabel(g.type) + '</td><td>' + esc(g.issue) + '</td></tr>');
+        });
+        out.push('</tbody></table>');
+      }
+
+      out.push('<h3>5.3 How to use this section</h3>');
+      out.push('<ul>' +
+        '<li>Every hazard reference here should appear in the safety risk management file as a hazardous ' +
+        'situation with a security cause, evaluated with the same severity scale as every other hazard.</li>' +
+        '<li>The mitigations in section 4 are candidate <em>risk controls</em>. Once chosen, they need the same ' +
+        'verification evidence as any other risk control, and the safety file should reference that evidence.</li>' +
+        '<li>Check that a security control does not itself create a new hazard — a lockout that blocks a clinician ' +
+        'in an emergency, or an update that reboots a device mid-therapy, is a safety risk of its own.</li>' +
+        '<li>Re-run this analysis on every design change, and after any change to the safety file.</li>' +
+        '</ul>');
+    }
+
     /* ---- gaps ---- */
-    out.push('<h2>5. Coverage gaps</h2>');
+    out.push('<h2>6. Coverage gaps</h2>');
     if (!a.gaps.length) {
       out.push('<p>Every element has all of its security categories answered. Good — the analysis above is ' +
         'based on stated facts rather than assumptions.</p>');
@@ -252,6 +377,7 @@ window.TM = window.TM || {};
       out.push('<tr><td>Base rating: ' + cap(k) + '</td><td class="num">' + esc(p.baseScores[k]) + '</td></tr>');
     });
     var factorLabels = {
+      patientSafety: 'Aggravating: the threat can reach the patient',
       sensitiveData: 'Aggravating: confidential or regulated data',
       externalExposure: 'Aggravating: internet-facing, anonymous-facing, or crosses an external boundary',
       markedAsset: 'Aggravating: element is marked as an asset',
@@ -270,7 +396,16 @@ window.TM = window.TM || {};
       out.push('<tr><td>Category adjustment: ' + c + ' — ' + esc(TM.STRIDE[c].name) + '</td><td class="num">' +
         (p.categoryPoints[c] > 0 ? '+' : '') + esc(p.categoryPoints[c]) + '</td></tr>');
     });
+    TM.HARM_SEVERITY.forEach(function (level) {
+      var pts = (p.harmSeverityPoints && p.harmSeverityPoints[level]) || 0;
+      if (!pts) return;
+      out.push('<tr><td>Patient-safety threat, severity of harm: ' + esc(level) + '</td><td class="num">+' +
+        esc(pts) + '</td></tr>');
+    });
     out.push('</tbody></table>');
+    out.push('<p class="muted">A threat that can reach the patient is weighted by the severity of the harm it could ' +
+      'cause, not only by the data it touches — which is the point of doing this for a medical device rather than ' +
+      'for an IT system.</p>');
 
     var overrides = Object.keys(p.ruleScores || {});
     if (overrides.length) {
@@ -290,6 +425,25 @@ window.TM = window.TM || {};
 
     return out.join('\n');
   };
+
+  /** The patient-safety consequence panel shown inside a safety finding. */
+  function safetyPanel(f) {
+    var s = f.safety;
+    var out = ['<div class="safety-panel">'];
+    out.push('<div class="safety-head"><b>Patient safety consequence</b> <span class="muted">' +
+      esc(s.hazardRef || '') + ' · ' + esc(s.fnLabel) + '</span></div>');
+    out.push('<div><b>Harm:</b> ' + esc(s.harm) + '</div>');
+    if (s.notes) out.push('<div><b>Hazardous situation (as modelled):</b> ' + esc(s.notes) + '</div>');
+    var bits = [];
+    if (!TM.isUnset(s.severityOfHarm)) bits.push('Severity of harm: <b>' + esc(s.severityOfHarm) + '</b>');
+    if (!TM.isUnset(s.softwareSafetyClass)) bits.push('Software safety class: ' + esc(s.softwareSafetyClass));
+    bits.push(s.fileRef
+      ? 'Safety file: <b>' + esc(s.fileRef) + '</b>'
+      : '<span class="missing-trace">No safety file reference recorded</span>');
+    out.push('<div class="muted">' + bits.join(' · ') + '</div>');
+    out.push('</div>');
+    return out.join('');
+  }
 
   /**
    * The CVSS v4.0 panel for one finding. Interactive in the app (an editable
@@ -380,7 +534,16 @@ window.TM = window.TM || {};
     '.finding-critical{border-left-color:#c62828}.finding-high{border-left-color:#e07b1a}',
     '.finding-medium{border-left-color:#cbb01f}.finding-low{border-left-color:#3f9c63}.finding-info{border-left-color:#7d8ba6}',
     '.finding-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px}',
-    '.mitig{margin-top:5px}.mitig b{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#5b6478}'
+    '.mitig{margin-top:5px}.mitig b{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#5b6478}',
+    '.safety-flag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;',
+    'padding:2px 7px;border-radius:20px;background:#fbe2e2;color:#8f1b1b}',
+    '.safety-callout{background:#fdf1f1;border-left:3px solid #c62828;padding:9px 12px;border-radius:4px;margin:10px 0}',
+    '.safety-panel{margin-top:7px;padding:7px 10px;border-radius:4px;background:#fdf5f5;border:1px solid #f2d3d3;font-size:12.5px}',
+    '.safety-panel>div{margin:2px 0}.missing-trace{color:#c62828;font-weight:600}',
+    '.level-swatch{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}',
+    '.stride-tag,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}',
+    '.cvss-current code{background:#f2f5fa;padding:1px 5px;border-radius:3px;font-size:11px}',
+    '.cvss-box{margin-top:7px;padding-top:6px;border-top:1px dashed #d3d9e4;font-size:12.5px}'
   ].join('');
 
   /* ---------------------------------------------------------------------
@@ -397,6 +560,11 @@ window.TM = window.TM || {};
     if (meta.author) L.push('- **Author:** ' + meta.author);
     if (meta.date) L.push('- **Date:** ' + meta.date);
     if (meta.scope) L.push('- **Scope / assumptions:** ' + meta.scope);
+    if (meta.intendedUse) L.push('- **Intended use:** ' + meta.intendedUse);
+    if (meta.safetyDoc || meta.safetyDocRef) {
+      L.push('- **Safety risk management file:** ' + (meta.safetyDoc || 'Not named') +
+        (meta.safetyDocRef ? ' (' + meta.safetyDocRef + ')' : ''));
+    }
     L.push('- **Methodology:** STRIDE per element');
     L.push('- **Severity scale:** ' + a.profile.name +
       (a.stats.scored ? ' (' + a.stats.scored + ' of ' + a.stats.total + ' threats scored with CVSS v4.0)' : ''));
@@ -411,7 +579,19 @@ window.TM = window.TM || {};
     L.push('| Trust boundaries | ' + a.stats.boundaries + ' |');
     L.push('| Assets | ' + a.stats.assets + ' |');
     L.push('| Threats identified | ' + a.stats.total + ' |');
+    L.push('| Threats affecting patient safety | ' + a.stats.safety + ' |');
+    L.push('| Safety-relevant elements | ' + a.stats.safetyElements + ' |');
     L.push('');
+    if (a.stats.safety) {
+      L.push('| Safety impact | What a compromise does to the patient | Threats |');
+      L.push('| --- | --- | --- |');
+      TM.SAFETY_FUNCTIONS.forEach(function (fn) {
+        var n = a.stats.bySafetyFunction[fn.key] || 0;
+        if (!n) return;
+        L.push('| ' + fn.short + ' — ' + md(fn.label) + ' | ' + md(fn.harm) + ' | ' + n + ' |');
+      });
+      L.push('');
+    }
     L.push('| Severity | ' + a.stats.levels.map(function (lv) { return md(lv.label); }).join(' | ') + ' |');
     L.push('| --- |' + a.stats.levels.map(function () { return ' --- |'; }).join(''));
     L.push('| Threats | ' + a.stats.levels.map(function (lv) { return lv.count; }).join(' | ') + ' |');
@@ -446,11 +626,12 @@ window.TM = window.TM || {};
     if (nodes.length) {
       L.push('### 2.2 Elements');
       L.push('');
-      L.push('| Element | Type | Description | Classification | In boundary | Asset |');
-      L.push('| --- | --- | --- | --- | --- | --- |');
+      L.push('| Element | Type | Description | Classification | Safety impact | Severity of harm | In boundary | Asset |');
+      L.push('| --- | --- | --- | --- | --- | --- | --- | --- |');
       nodes.forEach(function (n) {
         L.push('| ' + md(TM.label(n)) + ' | ' + typeLabel(n.type) + ' | ' + md(n.description || '—') + ' | ' +
-          md(plain(n.props.dataClassification)) + ' | ' +
+          md(plain(n.props.dataClassification)) + ' | ' + (safetyFlagsText(n) || '—') + ' | ' +
+          md(plain(n.props.harmSeverity)) + ' | ' +
           md(TM.boundariesContaining(model, n).map(TM.label).join(', ') || '—') + ' | ' +
           (n.isAsset || n.type === 'asset' ? 'yes' : '') + ' |');
       });
@@ -514,6 +695,15 @@ window.TM = window.TM || {};
           }
           L.push(f.threat);
           L.push('');
+          if (f.safety) {
+            L.push('> **Patient safety — ' + f.safety.hazardRef + ' · ' + f.safety.fnLabel + '**  ');
+            L.push('> **Harm:** ' + f.safety.harm + '  ');
+            if (f.safety.notes) L.push('> **Hazardous situation (as modelled):** ' + f.safety.notes + '  ');
+            L.push('> Severity of harm: ' + plain(f.safety.severityOfHarm) +
+              ' · Software safety class: ' + plain(f.safety.softwareSafetyClass) +
+              ' · Safety file: ' + (f.safety.fileRef || '**missing**'));
+            L.push('');
+          }
           if (f.via) { L.push('Via data flow: ' + f.via); L.push(''); }
           if (f.crossings && f.crossings.length) { L.push('Crosses: ' + f.crossings.join(', ')); L.push(''); }
           if (f.existingControls) { L.push('**Controls already in place:** ' + f.existingControls); L.push(''); }
@@ -524,7 +714,58 @@ window.TM = window.TM || {};
       });
     }
 
-    L.push('## 5. Coverage gaps');
+    L.push('## 5. Patient safety traceability');
+    L.push('');
+    if (!a.safetyTrace.length) {
+      L.push('No element carries a safety-relevant function, so there is nothing to trace to a safety risk ' +
+        'management file. For a medical device, revisit this.');
+      L.push('');
+    } else {
+      L.push('Each row is a security threat with a credible path to patient harm. Carry the hazard reference into ' +
+        'the safety risk management file' +
+        (meta.safetyDoc ? ' (' + meta.safetyDoc + (meta.safetyDocRef ? ', ' + meta.safetyDocRef : '') + ')' : '') +
+        ' so the security control and the safety risk control are the same decision.');
+      L.push('');
+      L.push('| Hazard ref | Threat | Element | STRIDE | Safety impact | Hazardous situation -> harm | Severity of harm | Severity | Safety file ref |');
+      L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+      a.safetyTrace.forEach(function (row) {
+        row.findings.forEach(function (f) {
+          L.push('| ' + f.safety.hazardRef + ' | ' + f.ref + ' | ' + md(row.label) + ' | ' + f.category +
+            ' | ' + TM.safetyFunction(f.safety.fn).short + ' | ' + md(f.title) + ' -> ' + md(f.safety.harm) +
+            ' | ' + md(plain(row.severityOfHarm)) + ' | ' + String(f.severity.label).toUpperCase() +
+            ' | ' + (row.fileRef ? md(row.fileRef) : '**missing**') + ' |');
+        });
+      });
+      L.push('');
+
+      var cleanRows = a.safetyTrace.filter(function (r) { return !r.findings.length; });
+      if (cleanRows.length) {
+        L.push('### 5.1 Safety-relevant elements with no threat raised');
+        L.push('');
+        L.push('Record these in the safety file as justified residual risks.');
+        L.push('');
+        L.push('| Element | Safety functions | Severity of harm | Controls in place | Safety file ref |');
+        L.push('| --- | --- | --- | --- | --- |');
+        cleanRows.forEach(function (row) {
+          L.push('| ' + md(row.label) + ' | ' + (safetyFlagsText({ props: { safetyFunctions: row.functions } }) || '—') +
+            ' | ' + md(plain(row.severityOfHarm)) + ' | ' + md(row.existingControls || 'none recorded') +
+            ' | ' + (row.fileRef ? md(row.fileRef) : '**missing**') + ' |');
+        });
+        L.push('');
+      }
+      if (a.safetyGaps.length) {
+        L.push('### 5.2 Breaks in the safety trace');
+        L.push('');
+        L.push('| Element | Type | What is missing |');
+        L.push('| --- | --- | --- |');
+        a.safetyGaps.forEach(function (g) {
+          L.push('| ' + md(g.label) + ' | ' + typeLabel(g.type) + ' | ' + md(g.issue) + ' |');
+        });
+        L.push('');
+      }
+    }
+
+    L.push('## 6. Coverage gaps');
     L.push('');
     if (!a.gaps.length) {
       L.push('All security categories are answered.');
@@ -592,6 +833,8 @@ window.TM = window.TM || {};
     var head = ['Ref', 'Element', 'Element type', 'STRIDE', 'Category', 'Property violated',
       'Threat title', 'Threat description', 'Severity', 'Severity source', 'Score',
       'CVSS v4.0 vector', 'CVSS v4.0 score', 'CVSS rationale',
+      'Affects patient safety', 'Safety hazard ref', 'Safety impact', 'Harm',
+      'Severity of harm', 'Safety file ref',
       'Crosses boundary', 'Via flow', 'Existing controls', 'Recommended mitigations', 'Rule id'];
     var rows = [head];
     a.findings.forEach(function (f) {
@@ -601,16 +844,69 @@ window.TM = window.TM || {};
         String(f.severity.label).toUpperCase(), f.severity.source, f.severity.score,
         f.cvss ? f.cvss.vector : '', f.cvss ? Number(f.cvss.score).toFixed(1) : '',
         f.cvss ? f.cvss.rationale : '',
+        f.safety ? 'Yes' : 'No',
+        f.safety ? f.safety.hazardRef : '',
+        f.safety ? TM.safetyFunction(f.safety.fn).short : '',
+        f.safety ? f.safety.harm : '',
+        f.safety ? plain(f.safety.severityOfHarm) : '',
+        f.safety ? f.safety.fileRef : '',
         (f.crossings || []).join('; '), f.via || '', f.existingControls || '',
         f.mitigations.join(' | '), f.ruleId
       ]);
     });
+    return toCSV(rows);
+  };
+
+  /**
+   * The security-to-safety traceability matrix, as a CSV that can be pasted
+   * into or referenced from the safety risk management file. One row per
+   * safety-relevant threat, plus a row for every safety-relevant element
+   * where no threat was raised (which still needs a recorded justification).
+   */
+  TM.buildSafetyTraceCSV = function (model, a) {
+    var meta = model.meta || {};
+    var head = ['Hazard ref', 'Threat ref', 'Element', 'Element type', 'Safety function',
+      'STRIDE', 'STRIDE category', 'Security threat (cause)', 'Hazardous situation',
+      'Harm', 'Severity of harm', 'Software safety class', 'Security severity',
+      'CVSS v4.0 vector', 'CVSS v4.0 score', 'Candidate risk controls',
+      'Controls already in place', 'Safety file reference', 'Threat model', 'Safety file'];
+    var rows = [head];
+
+    a.safetyTrace.forEach(function (row) {
+      if (row.findings.length) {
+        row.findings.forEach(function (f) {
+          rows.push([
+            f.safety.hazardRef, f.ref, row.label, typeLabel(row.type),
+            TM.safetyFunction(f.safety.fn).label, f.category, TM.STRIDE[f.category].name,
+            f.title, row.notes || f.safety.hazard, f.safety.harm,
+            plain(row.severityOfHarm), plain(row.softwareSafetyClass),
+            String(f.severity.label).toUpperCase(),
+            f.cvss ? f.cvss.vector : '', f.cvss ? Number(f.cvss.score).toFixed(1) : '',
+            f.mitigations.join(' | '), row.existingControls || '',
+            row.fileRef || 'MISSING', meta.name || '', meta.safetyDoc || ''
+          ]);
+        });
+      } else {
+        rows.push([
+          '', '', row.label, typeLabel(row.type),
+          row.functions.map(function (k) { return TM.safetyFunction(k).label; }).join('; '),
+          '', '', 'No security threat raised by the model',
+          row.notes || '', '', plain(row.severityOfHarm), plain(row.softwareSafetyClass),
+          '', '', '', '', row.existingControls || '',
+          row.fileRef || 'MISSING', meta.name || '', meta.safetyDoc || ''
+        ]);
+      }
+    });
+    return toCSV(rows);
+  };
+
+  function toCSV(rows) {
     return rows.map(function (r) {
       return r.map(function (cell) {
         var v = String(cell === undefined || cell === null ? '' : cell);
         return '"' + v.replace(/"/g, '""') + '"';
       }).join(',');
     }).join('\r\n');
-  };
+  }
 
 })(window.TM);

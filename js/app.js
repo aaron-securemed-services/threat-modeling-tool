@@ -269,6 +269,18 @@
       download(slug(state.model.meta.name || 'threat-model') + '-threats.csv',
         TM.buildReportCSV(r.model, r.analysis), 'text/csv');
     });
+    $('btnSafetyCsv').addEventListener('click', function () {
+      var r = state.lastReport;
+      if (!r.analysis.safetyTrace.length) {
+        alert('Nothing to trace yet: no element on the diagram has a safety-relevant function.\n\n' +
+          'Select an element and tick what it does under "Patient safety" — controls therapy, raises alarms, ' +
+          'implements a safety stop, and so on.');
+        return;
+      }
+      download(slug(state.model.meta.name || 'threat-model') + '-safety-traceability.csv',
+        TM.buildSafetyTraceCSV(r.model, r.analysis), 'text/csv');
+      status('Safety traceability matrix exported.');
+    });
     $('btnReportPrint').addEventListener('click', function () { window.print(); });
   }
 
@@ -492,6 +504,23 @@
     }
     body.appendChild(hint);
 
+    /* Patient safety summary: what this element can do to the patient. */
+    var fns = TM.safetyFunctionsOf(el);
+    if (fns.length) {
+      var sh = document.createElement('div');
+      sh.className = 'stride-hint safety-hint';
+      var missing = [];
+      if (TM.isUnset((el.props || {}).harmSeverity)) missing.push('severity of harm');
+      if (!((el.props || {}).safetyFileRef || '').trim()) missing.push('safety file reference');
+      sh.innerHTML = '<b>Reaches the patient:</b> ' +
+        fns.map(function (k) {
+          return '<span class="safety-flag">' + escapeHtml(TM.safetyFunction(k).short) + '</span>';
+        }).join(' ') +
+        '<br>Safety hazards are analysed for each of these and traced in the report.' +
+        (missing.length ? '<br><b>Still needed for traceability:</b> ' + escapeHtml(missing.join(', ')) + '.' : '');
+      body.appendChild(sh);
+    }
+
     body.appendChild(field({
       key: 'title', label: 'Title', type: 'text', value: el.title,
       help: 'Short name shown inside the shape.'
@@ -549,13 +578,20 @@
       var lg = document.createElement('legend');
       lg.textContent = groupName;
       fs.appendChild(lg);
+      if (groupName === 'Patient safety') fs.className = 'fieldset-safety';
       groups[groupName].forEach(function (f) {
+        var type = f.type === 'text' ? 'text'
+          : f.type === 'textarea' ? 'textarea'
+            : f.type === 'multi' ? 'multi' : 'select';
+        var stored = el.props && el.props[f.key];
         fs.appendChild(field({
           key: 'props.' + f.key,
           label: f.label,
-          type: f.type === 'text' ? 'text' : 'select',
+          type: type,
           options: f.options,
-          value: (el.props && el.props[f.key]) || (f.type === 'text' ? '' : TM.UNSET),
+          value: stored !== undefined && stored !== null
+            ? stored
+            : (type === 'multi' ? [] : (type === 'select' ? TM.UNSET : '')),
           help: f.help
         }, el));
       });
@@ -614,10 +650,13 @@
     container.innerHTML = '<h2>Threat model details</h2>';
     var meta = state.model.meta;
     [
-      { key: 'system', label: 'System / scope name', type: 'text', help: 'The system this diagram describes.' },
+      { key: 'system', label: 'System / device name', type: 'text', help: 'The system or device this diagram describes.' },
       { key: 'author', label: 'Author(s)', type: 'text' },
       { key: 'date', label: 'Date', type: 'text' },
-      { key: 'scope', label: 'Scope and assumptions', type: 'textarea', help: 'What is in scope, what is explicitly out, and what you are assuming. Printed at the top of the report.' }
+      { key: 'intendedUse', label: 'Intended use', type: 'textarea', help: 'What the device is for, and for which patients. Everything about patient safety is judged against this.' },
+      { key: 'scope', label: 'Scope and assumptions', type: 'textarea', help: 'What is in scope, what is explicitly out, and what you are assuming. Printed at the top of the report.' },
+      { key: 'safetyDoc', label: 'Safety risk management file', type: 'text', help: 'The ISO 14971 risk management file this security analysis feeds, by name.' },
+      { key: 'safetyDocRef', label: 'Safety file document ID / version', type: 'text', help: 'Printed on the traceability matrix so the two documents can be reconciled.' }
     ].forEach(function (f) {
       var wrap = document.createElement('div');
       wrap.className = 'field';
@@ -653,6 +692,58 @@
     var lbl = document.createElement('label');
     lbl.textContent = def.label;
     wrap.appendChild(lbl);
+
+    /* Multi-select: a checkbox per option, stored as an array. Used for the
+       safety-relevant functions, where an element can play several roles. */
+    if (def.type === 'multi') {
+      /* def.key is namespaced ("props.safetyFunctions"); the array lives under
+         the bare key inside el.props. */
+      var propKey = def.key.indexOf('props.') === 0 ? def.key.slice(6) : def.key;
+      var selected = Array.isArray(def.value) ? def.value.slice() : [];
+      var list = document.createElement('div');
+      list.className = 'multi-list';
+      (def.options || []).forEach(function (opt) {
+        var row = document.createElement('label');
+        row.className = 'multi-option';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selected.indexOf(opt.value) !== -1;
+        cb.setAttribute('data-field', def.key + '.' + opt.value);
+        cb.addEventListener('change', function () {
+          checkpoint();
+          el.props = el.props || {};
+          var current = Array.isArray(el.props[propKey]) ? el.props[propKey].slice() : [];
+          var at = current.indexOf(opt.value);
+          if (cb.checked && at === -1) current.push(opt.value);
+          if (!cb.checked && at !== -1) current.splice(at, 1);
+          el.props[propKey] = current;
+          state.diagram.render();
+          onModelChanged();
+        });
+        var textWrap = document.createElement('span');
+        var strong = document.createElement('span');
+        strong.className = 'multi-label';
+        strong.textContent = opt.label;
+        textWrap.appendChild(strong);
+        if (opt.help) {
+          var hint = document.createElement('span');
+          hint.className = 'multi-help';
+          hint.textContent = opt.help;
+          textWrap.appendChild(hint);
+        }
+        row.appendChild(cb);
+        row.appendChild(textWrap);
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
+      if (def.help) {
+        var mh = document.createElement('div');
+        mh.className = 'field-help';
+        mh.textContent = def.help;
+        wrap.appendChild(mh);
+      }
+      return wrap;
+    }
 
     var input;
     if (def.type === 'select') {
@@ -970,6 +1061,21 @@
       'encryption, logging, validation, throttling, backup) decide which threats fire.</p>',
       '<p>Leave a category on <em>not set</em> and it is reported as a coverage gap rather than assumed safe — ' +
       'that distinction is worth making explicit with a class.</p>',
+      '<h3>2a. Patient safety</h3>',
+      '<p>This is what separates a medical device threat model from an IT one. For each element, tick the ' +
+      '<b>safety-relevant functions</b> it performs — whether it controls or actuates therapy, generates or carries ' +
+      'alarms, implements a safety stop or interlock, produces clinical data, or is needed for timely care. Then set ' +
+      'the worst-case <b>severity of harm</b>, the <b>IEC 62304 software safety class</b>, and the <b>safety file ' +
+      'reference</b> (the hazard or risk control ID in your ISO 14971 risk management file).</p>',
+      '<p>Elements that can reach the patient are marked on the diagram with a red badge and a letter per function ' +
+      '(C control, A alarms, S safety stop, D clinical data, T care delivery). The report analyses each of those ' +
+      'functions for the safety hazards a security compromise creates, states the <b>harm</b> in clinical terms, and ' +
+      'gives every one a hazard reference (SEC-HAZ-nnn) you can carry into the safety file. Section 5 of the report ' +
+      'is the traceability matrix, also downloadable as its own CSV.</p>',
+      '<p>Three questions worth putting to a class for every element: could a compromise here <b>control the device ' +
+      'in a way that harms the patient</b>? Could it cause <b>incorrect alarms</b> — real ones suppressed, or false ' +
+      'ones injected? Could it <b>degrade a safety stop</b> so the last barrier does not engage? A "no" is an answer ' +
+      'worth recording, not a blank.</p>',
       '<h3>3. Generate the report</h3>',
       '<p>Press <b>STRIDE report</b>. The report applies STRIDE per element:</p>',
       '<table><thead><tr><th>Letter</th><th>Threat</th><th>Violates</th><th>Applies to</th></tr></thead><tbody>',
@@ -1030,7 +1136,8 @@
       _readme: [
         'Severity scoring profile for the STRIDE threat modeling tool.',
         'Score = baseScores[rule base rating] + categoryPoints[STRIDE letter]',
-        '        + aggravatorPoints that apply - mitigatorPoints that apply.',
+        '        + aggravatorPoints that apply - mitigatorPoints that apply',
+        '        + harmSeverityPoints[severity of harm] for patient-safety threats.',
         'The score is then mapped onto the highest level whose "min" it reaches.',
         'Keys beginning with _ are ignored.'
       ],
@@ -1046,12 +1153,17 @@
       baseScores: { info: 1, low: 2, medium: 3, high: 4, critical: 6 },
       categoryPoints: { S: 0, T: 0, R: 0, I: 0.5, D: 0, E: 0.5 },
       aggravatorPoints: {
+        patientSafety: 0.5,
         sensitiveData: 0.5,
         externalExposure: 0.5,
         markedAsset: 0.5,
         safetyCriticalDoS: 0.5
       },
       mitigatorPoints: { publicData: 0.5, lowAvailabilityNeed: 0.5 },
+      harmSeverityPoints: TM.HARM_SEVERITY.reduce(function (acc, level) {
+        acc[level] = TM.HARM_SEVERITY_POINTS[level];
+        return acc;
+      }, {}),
       ruleScores: {
         'ds-i-rest': 5,
         'proc-e-chain': 6
@@ -1070,18 +1182,24 @@
   }
 
   /* ---------------------------------------------------------------------
-   * Worked example - a small patient portal, deliberately imperfect so the
-   * generated report has something to say in every STRIDE category.
+   * Worked example - a connected infusion pump, deliberately imperfect so the
+   * generated report has something to say in every STRIDE category and in all
+   * three patient-safety classes: device control, alarms and safety stops.
    * ------------------------------------------------------------------- */
   function sampleModel() {
     var m = TM.emptyModel();
     m.meta = {
-      name: 'Patient portal (worked example)',
-      system: 'Web portal that lets patients view results and message their clinician',
+      name: 'Connected infusion pump (worked example)',
+      system: 'Large-volume infusion pump with hospital connectivity and a vendor cloud service',
       author: 'Teaching example',
       date: new Date().toISOString().slice(0, 10),
-      scope: 'In scope: the portal web tier, its API, the records database and the billing integration. ' +
-        'Out of scope: the clinical EHR itself, corporate IT and physical security of the data centre.'
+      intendedUse: 'Continuous and bolus intravenous delivery of medication to adult and paediatric inpatients, ' +
+        'programmed at the bedside or by auto-programming from the EHR, under the supervision of clinical staff.',
+      scope: 'In scope: the pump controller and its dose-limit interlock, the alarm path to the nurse call system, ' +
+        'the hospital gateway, the drug library service and the vendor telemetry cloud. Out of scope: the EHR itself, ' +
+        'hospital network infrastructure, and physical security of the ward.',
+      safetyDoc: 'Infusion Pump Risk Management File (ISO 14971)',
+      safetyDocRef: 'RMF-IP-2200 rev C'
     };
 
     function node(type, x, y, w, h, title, description, props, isAsset) {
@@ -1104,131 +1222,244 @@
       return f;
     }
 
-    var internet = node('boundary', 40, 40, 360, 480, 'Internet',
-      'Anything outside our control.', { boundaryKind: 'Internet / DMZ perimeter' });
-    var corp = node('boundary', 460, 40, 620, 480, 'Hosting VPC (internal network)',
-      'Our managed cloud environment.', { boundaryKind: 'Network segment' });
-    void internet; void corp;
+    /* ---- trust boundaries ---- */
+    node('boundary', 40, 60, 420, 560, 'Pump enclosure (device)',
+      'The physical device: firmware, actuator and local user interface.',
+      { boundaryKind: 'Machine / process boundary' });
+    node('boundary', 500, 60, 400, 560, 'Hospital network',
+      'The clinical network the pump joins over Wi-Fi.',
+      { boundaryKind: 'Network segment' });
+    node('boundary', 940, 60, 340, 560, 'Vendor cloud',
+      'Manufacturer-operated telemetry and fleet management service.',
+      { boundaryKind: 'Third-party or vendor' });
 
-    var patient = node('entity', 100, 120, 160, 70, 'Patient',
-      'Members of the public using the portal from their own devices.', {
+    /* ---- inside the pump ---- */
+    var pumpCtl = node('process', 90, 140, 190, 96, 'Pump controller',
+      'Firmware that computes and drives the infusion rate.', {
+        safetyFunctions: ['control'],
+        harmSeverity: 'Catastrophic — patient death',
+        softwareSafetyClass: 'Class C — death or serious injury possible',
+        safetyFileRef: 'HAZ-001, HAZ-004, RC-011',
+        safetyNotes: 'Over-infusion of a high-alert medication. The controller drives the actuator directly, so any ' +
+          'altered rate or programme becomes delivered therapy within one pump cycle.',
+        exposure: 'Internal network',
+        privilege: 'Elevated service account',
+        inputValidation: 'Partial / deny-list',
+        resilience: 'Timeouts only',
+        authentication: 'Shared secret or API key',
+        authorization: 'Simple ownership check',
+        logging: 'Errors only',
+        dataClassification: 'Restricted (PII / PHI / PCI)',
+        criticality: 'Critical (safety / life)',
+        owner: 'Device firmware team'
+      }, true);
+
+    var interlock = node('process', 90, 290, 190, 88, 'Dose limit interlock',
+      'Independent hard-limit check before actuation.', {
+        safetyFunctions: ['safetyStop'],
+        harmSeverity: 'Catastrophic — patient death',
+        softwareSafetyClass: 'Class C — death or serious injury possible',
+        safetyFileRef: 'RC-011, RC-012',
+        safetyNotes: 'This is the last barrier between a wrong programmed dose and the patient. If its limits are ' +
+          'widened, or it does not get to run, nothing else stops an unsafe infusion.',
+        exposure: 'Internal network',
+        privilege: 'Least privilege',
+        inputValidation: 'Partial / deny-list',
+        resilience: 'None',
+        authentication: 'None / anonymous',
+        authorization: 'Shared credential for everyone',
+        logging: 'None',
+        dataClassification: 'Internal',
+        criticality: 'Critical (safety / life)',
+        owner: 'Device firmware team'
+      }, true);
+
+    var alarmMgr = node('process', 90, 430, 190, 88, 'Alarm manager',
+      'Detects alarm conditions and annunciates locally and remotely.', {
+        safetyFunctions: ['alarm'],
+        harmSeverity: 'Critical — permanent impairment or life-threatening injury',
+        softwareSafetyClass: 'Class C — death or serious injury possible',
+        safetyFileRef: 'HAZ-007',
+        safetyNotes: 'Occlusion, air-in-line and infusion-complete alarms. A suppressed alarm means deterioration ' +
+          'goes unnoticed; injected false alarms cause alarm fatigue on the ward.',
+        exposure: 'Internal network',
+        privilege: 'Least privilege',
+        inputValidation: 'None',
+        resilience: 'None',
+        authentication: 'None / anonymous',
+        authorization: 'None',
+        logging: 'Errors only',
+        dataClassification: 'Confidential',
+        criticality: 'Critical (safety / life)',
+        owner: 'Device firmware team'
+      });
+
+    var drugLib = node('datastore', 90, 540, 190, 66, 'Drug library (on device)',
+      'Dose limits and concentrations per medication.', {
+        safetyFunctions: ['safetyStop'],
+        harmSeverity: 'Catastrophic — patient death',
+        softwareSafetyClass: 'Class C — death or serious injury possible',
+        safetyFileRef: 'RC-012',
+        safetyNotes: 'The limits the interlock enforces. Tampering here silently widens what the pump will accept ' +
+          'as a legitimate dose.',
+        storeKind: 'File share',
+        encryptionAtRest: 'None',
+        integrity: 'None',
+        backup: 'Tested backups with retention',
+        authentication: 'Shared secret or API key',
+        authorization: 'Shared credential for everyone',
+        logging: 'None',
+        dataClassification: 'Internal',
+        criticality: 'Critical (safety / life)',
+        owner: 'Pharmacy informatics'
+      }, true);
+
+    /* ---- clinical users ---- */
+    var nurse = node('entity', 540, 140, 170, 74, 'Nurse (bedside)',
+      'Programmes the infusion at the pump and responds to alarms.', {
+        safetyFunctions: ['control', 'careDelivery'],
+        harmSeverity: 'Serious — injury needing professional intervention',
+        safetyFileRef: 'HAZ-002',
+        safetyNotes: 'Use error and spoofed identity both end in a wrong programme reaching the pump.',
         entityKind: 'Human user',
-        trustLevel: 'Untrusted (anonymous)',
+        trustLevel: 'Semi-trusted (authenticated)',
         authentication: 'Username + password',
         logging: 'Errors only',
         dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'Medium'
+        criticality: 'High',
+        owner: 'Clinical engineering'
       });
 
-    var clinician = node('entity', 100, 260, 160, 70, 'Clinician',
-      'Staff replying to messages and releasing results.', {
+    var biomed = node('entity', 540, 250, 170, 74, 'Biomed / service tech',
+      'Services the pump and updates the drug library.', {
+        safetyFunctions: ['safetyStop'],
+        harmSeverity: 'Catastrophic — patient death',
+        safetyFileRef: 'HAZ-009',
+        safetyNotes: 'Holds the credentials that can change dose limits and disable interlocks.',
         entityKind: 'Privileged user / administrator',
-        trustLevel: 'Semi-trusted (authenticated)',
-        authentication: 'Username + password',
-        logging: 'Security events logged',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'High'
-      });
-
-    var billing = node('entity', 100, 400, 160, 70, 'Billing SaaS',
-      'Third-party billing provider.', {
-        entityKind: 'Third-party service',
         trustLevel: 'Semi-trusted (authenticated)',
         authentication: 'Shared secret or API key',
         logging: 'None',
-        dataClassification: 'Confidential',
-        criticality: 'Low'
-      });
-
-    var web = node('process', 520, 110, 180, 92, 'Portal web app',
-      'Server-rendered front end.', {
-        exposure: 'Internet-facing',
-        privilege: 'Least privilege',
-        inputValidation: 'Partial / deny-list',
-        resilience: 'Timeouts only',
-        authentication: 'Session token / JWT',
-        authorization: 'Role-based (RBAC)',
-        logging: 'Security events logged',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
+        dataClassification: 'Internal',
         criticality: 'High',
-        owner: 'Portal team'
+        owner: 'Clinical engineering'
       });
 
-    var api = node('process', 790, 110, 180, 92, 'Records API',
-      'Reads and writes patient records.', {
+    /* ---- hospital network ---- */
+    var gateway = node('process', 540, 370, 190, 92, 'Hospital gateway',
+      'Bridges pumps to hospital systems and the vendor cloud.', {
+        safetyFunctions: ['control', 'alarm', 'careDelivery'],
+        harmSeverity: 'Critical — permanent impairment or life-threatening injury',
+        softwareSafetyClass: 'Class B — non-serious injury possible',
+        safetyFileRef: 'HAZ-004, HAZ-007',
+        safetyNotes: 'Carries auto-programming orders towards the pump and alarms away from it. A compromise here ' +
+          'reaches every pump on the ward at once.',
         exposure: 'Internal network',
         privilege: 'Elevated service account',
         inputValidation: 'None',
         resilience: 'None',
         authentication: 'None / anonymous',
-        authorization: 'Simple ownership check',
+        authorization: 'None',
         logging: 'Errors only',
         dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'High',
-        owner: 'Platform team'
+        criticality: 'Critical (safety / life)',
+        owner: 'Hospital IT'
       });
 
-    var db = node('datastore', 790, 290, 190, 76, 'Patient records DB',
-      'PostgreSQL: results, messages, demographics.', {
-        storeKind: 'Relational database',
-        encryptionAtRest: 'Full-disk / volume',
-        integrity: 'Constraints / checksums',
-        backup: 'Backups, never tested',
+    var nurseCall = node('process', 540, 500, 190, 88, 'Nurse call system',
+      'Escalates device alarms to staff handsets.', {
+        safetyFunctions: ['alarm', 'careDelivery'],
+        harmSeverity: 'Critical — permanent impairment or life-threatening injury',
+        softwareSafetyClass: 'Class B — non-serious injury possible',
+        safetyFileRef: 'HAZ-007, RC-021',
+        safetyNotes: 'The remote half of the alarm path. If alarms are delayed or lost here, the bedside alarm is ' +
+          'the only remaining barrier.',
+        exposure: 'Internal network',
+        privilege: 'Least privilege',
+        inputValidation: 'Partial / deny-list',
+        resilience: 'Timeouts only',
         authentication: 'Shared secret or API key',
-        authorization: 'Shared credential for everyone',
-        logging: 'None',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
+        authorization: 'Role-based (RBAC)',
+        logging: 'Security events logged',
+        dataClassification: 'Confidential',
         criticality: 'Critical (safety / life)',
-        owner: 'Platform team'
-      }, true);
+        owner: 'Hospital IT'
+      });
 
-    var audit = node('datastore', 520, 290, 190, 76, 'Application log store',
-      'Aggregated application and access logs.', {
+    /* ---- vendor cloud ---- */
+    var cloud = node('process', 980, 190, 190, 92, 'Vendor fleet service',
+      'Telemetry, drug library distribution and firmware updates.', {
+        safetyFunctions: ['safetyStop', 'control'],
+        harmSeverity: 'Catastrophic — patient death',
+        softwareSafetyClass: 'Class C — death or serious injury possible',
+        safetyFileRef: 'HAZ-011',
+        safetyNotes: 'Distributes the drug library and firmware to the whole fleet. A compromise is a fleet-wide ' +
+          'safety event, not a single-device one.',
+        exposure: 'Internet-facing',
+        privilege: 'Elevated service account',
+        inputValidation: 'Partial / deny-list',
+        resilience: 'Rate limiting / quotas',
+        authentication: 'Session token / JWT',
+        authorization: 'Role-based (RBAC)',
+        logging: 'Security events logged',
+        dataClassification: 'Restricted (PII / PHI / PCI)',
+        criticality: 'High',
+        owner: 'Vendor cloud team'
+      });
+
+    var telemetry = node('datastore', 980, 350, 190, 66, 'Telemetry & event store',
+      'Infusion events, alarms and device logs.', {
+        safetyFunctions: ['clinicalData'],
+        harmSeverity: 'Minor — temporary injury, no professional intervention',
+        softwareSafetyClass: 'Class A — no injury possible',
+        safetyFileRef: 'HAZ-013',
         storeKind: 'Object / blob storage',
-        encryptionAtRest: 'None',
+        encryptionAtRest: 'Full-disk / volume',
         integrity: 'None',
-        backup: 'Tested backups with retention',
+        backup: 'Backups, never tested',
         authentication: 'Session token / JWT',
         authorization: 'Role-based (RBAC)',
         logging: 'Errors only',
-        dataClassification: 'Confidential',
-        criticality: 'Medium'
+        dataClassification: 'Restricted (PII / PHI / PCI)',
+        criticality: 'Medium',
+        owner: 'Vendor cloud team'
       });
 
-    var phi = node('asset', 620, 420, 96, 82, 'PHI',
+    var patient = node('asset', 990, 480, 100, 86, 'Patient',
       '', {
-        assetKind: 'Information',
+        safetyFunctions: ['control', 'careDelivery'],
+        harmSeverity: 'Catastrophic — patient death',
+        safetyFileRef: 'RMF-IP-2200',
+        safetyNotes: 'The asset every other control exists to protect.',
+        assetKind: 'Physical',
         dataClassification: 'Restricted (PII / PHI / PCI)',
         criticality: 'Critical (safety / life)',
-        owner: 'Chief Privacy Officer'
-      });
-    void phi;
+        owner: 'Clinical service'
+      }, true);
+    void patient;
 
-    flow(patient, web, 'Portal session', 'Login, results, secure messaging.', {
-      protocol: 'HTTPS / TLS',
-      encryptionInTransit: 'TLS (server authenticated)',
-      flowIntegrity: 'Transport (TLS) only',
+    /* ---- flows ---- */
+    flow(nurse, pumpCtl, 'Programme infusion', 'Rate, dose and duration entered at the bedside.', {
+      safetyFunctions: ['control'],
+      harmSeverity: 'Catastrophic — patient death',
+      softwareSafetyClass: 'Class C — death or serious injury possible',
+      safetyFileRef: 'HAZ-002',
+      protocol: 'Other',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
       throttling: 'None',
-      authentication: 'Session token / JWT',
-      authorization: 'Role-based (RBAC)',
-      logging: 'Security events logged',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'High'
-    }, true);
-
-    flow(clinician, web, 'Clinician workspace', 'Review and release results, reply to messages.', {
-      protocol: 'HTTPS / TLS',
-      encryptionInTransit: 'TLS (server authenticated)',
-      flowIntegrity: 'Transport (TLS) only',
-      throttling: 'Timeouts only',
       authentication: 'Username + password',
-      authorization: 'Role-based (RBAC)',
-      logging: 'Security events logged',
+      authorization: 'Simple ownership check',
+      logging: 'Errors only',
       dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'High'
-    }, true);
+      criticality: 'Critical (safety / life)'
+    });
 
-    flow(web, api, 'Record lookup', 'Internal service call.', {
+    flow(gateway, pumpCtl, 'Auto-programming order', 'Pharmacy order pushed to the pump from the EHR.', {
+      safetyFunctions: ['control'],
+      harmSeverity: 'Catastrophic — patient death',
+      softwareSafetyClass: 'Class C — death or serious injury possible',
+      safetyFileRef: 'HAZ-004',
       protocol: 'HTTP (cleartext)',
       encryptionInTransit: 'None (cleartext)',
       flowIntegrity: 'None',
@@ -1237,22 +1468,104 @@
       authorization: 'None',
       logging: 'None',
       dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'High'
+      criticality: 'Critical (safety / life)'
+    });
+
+    flow(pumpCtl, interlock, 'Requested rate check', 'Every programmed rate is checked against the hard limits.', {
+      safetyFunctions: ['safetyStop'],
+      harmSeverity: 'Catastrophic — patient death',
+      safetyFileRef: 'RC-011',
+      protocol: 'Other',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
+      throttling: 'None',
+      authentication: 'None / anonymous',
+      authorization: 'None',
+      logging: 'None',
+      dataClassification: 'Internal',
+      criticality: 'Critical (safety / life)'
     }, true);
 
-    flow(api, db, 'SQL queries', 'Reads and writes patient records.', {
-      protocol: 'SQL / database protocol',
-      encryptionInTransit: 'TLS (server authenticated)',
-      flowIntegrity: 'Transport (TLS) only',
+    flow(drugLib, interlock, 'Dose limits', 'Limits the interlock enforces.', {
+      safetyFunctions: ['safetyStop'],
+      harmSeverity: 'Catastrophic — patient death',
+      safetyFileRef: 'RC-012',
+      protocol: 'Other',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
+      throttling: 'Timeouts only',
+      authentication: 'None / anonymous',
+      authorization: 'None',
+      logging: 'None',
+      dataClassification: 'Internal',
+      criticality: 'Critical (safety / life)'
+    });
+
+    flow(pumpCtl, alarmMgr, 'Alarm conditions', 'Occlusion, air-in-line, battery and completion events.', {
+      safetyFunctions: ['alarm'],
+      harmSeverity: 'Critical — permanent impairment or life-threatening injury',
+      safetyFileRef: 'HAZ-007',
+      protocol: 'Other',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
+      throttling: 'None',
+      authentication: 'None / anonymous',
+      authorization: 'None',
+      logging: 'Errors only',
+      dataClassification: 'Confidential',
+      criticality: 'Critical (safety / life)'
+    });
+
+    flow(alarmMgr, nurseCall, 'Remote alarm escalation', 'Alarms forwarded to staff handsets.', {
+      safetyFunctions: ['alarm'],
+      harmSeverity: 'Critical — permanent impairment or life-threatening injury',
+      safetyFileRef: 'HAZ-007, RC-021',
+      protocol: 'HTTP (cleartext)',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
+      throttling: 'None',
+      authentication: 'Shared secret or API key',
+      authorization: 'None',
+      logging: 'Errors only',
+      dataClassification: 'Confidential',
+      criticality: 'Critical (safety / life)'
+    });
+
+    flow(biomed, drugLib, 'Drug library update', 'Service tooling writes new dose limits to the pump.', {
+      safetyFunctions: ['safetyStop'],
+      harmSeverity: 'Catastrophic — patient death',
+      safetyFileRef: 'HAZ-009',
+      protocol: 'SMB / NFS file share',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
       throttling: 'None',
       authentication: 'Shared secret or API key',
       authorization: 'Shared credential for everyone',
       logging: 'None',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'Critical (safety / life)'
-    }, true);
+      dataClassification: 'Internal',
+      criticality: 'High'
+    });
 
-    flow(web, audit, 'Application logs', 'Request and error logs shipped to the log store.', {
+    flow(cloud, gateway, 'Drug library & firmware distribution', 'Fleet-wide updates pushed to the hospital.', {
+      safetyFunctions: ['safetyStop', 'control'],
+      harmSeverity: 'Catastrophic — patient death',
+      softwareSafetyClass: 'Class C — death or serious injury possible',
+      safetyFileRef: 'HAZ-011',
+      protocol: 'HTTPS / TLS',
+      encryptionInTransit: 'TLS (server authenticated)',
+      flowIntegrity: 'Transport (TLS) only',
+      throttling: 'Timeouts only',
+      authentication: 'Shared secret or API key',
+      authorization: 'Shared credential for everyone',
+      logging: 'Security events logged',
+      dataClassification: 'Internal',
+      criticality: 'High'
+    });
+
+    flow(gateway, cloud, 'Device telemetry', 'Infusion and alarm events sent to the vendor.', {
+      safetyFunctions: ['clinicalData'],
+      harmSeverity: 'Minor — temporary injury, no professional intervention',
+      safetyFileRef: 'HAZ-013',
       protocol: 'HTTPS / TLS',
       encryptionInTransit: 'TLS (server authenticated)',
       flowIntegrity: 'Transport (TLS) only',
@@ -1260,24 +1573,40 @@
       authentication: 'Shared secret or API key',
       authorization: 'Role-based (RBAC)',
       logging: 'Errors only',
-      dataClassification: 'Confidential',
-      criticality: 'Low'
+      dataClassification: 'Restricted (PII / PHI / PCI)',
+      criticality: 'Medium'
     });
 
-    flow(api, billing, 'Billing export', 'Nightly claim export.', {
+    flow(cloud, telemetry, 'Store events', 'Telemetry written to the event store.', {
+      protocol: 'HTTPS / TLS',
+      encryptionInTransit: 'TLS (server authenticated)',
+      flowIntegrity: 'Transport (TLS) only',
+      throttling: 'Rate limited / throttled',
+      authentication: 'Session token / JWT',
+      authorization: 'Role-based (RBAC)',
+      logging: 'Errors only',
+      dataClassification: 'Restricted (PII / PHI / PCI)',
+      criticality: 'Medium'
+    });
+
+    flow(alarmMgr, nurse, 'Bedside annunciation', 'Audible and visual alarm at the pump.', {
+      safetyFunctions: ['alarm'],
+      harmSeverity: 'Critical — permanent impairment or life-threatening injury',
+      safetyFileRef: 'RC-021',
       protocol: 'Physical / manual transfer',
       encryptionInTransit: 'None (cleartext)',
       flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'Shared secret or API key',
-      authorization: 'Shared credential for everyone',
+      throttling: 'Timeouts only',
+      authentication: 'None / anonymous',
+      authorization: 'None',
       logging: 'None',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'Low'
+      dataClassification: 'Confidential',
+      criticality: 'Critical (safety / life)'
     });
 
     return m;
   }
+
 
   TM.sampleModel = sampleModel;
   TM.app = state;   /* exposed for debugging and for automated checks */

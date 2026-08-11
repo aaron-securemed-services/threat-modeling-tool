@@ -17,6 +17,7 @@ window.TM = window.TM || {};
   var MUTED = '#5b6478';
   var BOUNDARY_RED = '#e23b3b';
   var ASSET_FILL = '#2b6b86';
+  var SAFETY_RED = '#c62828';
   var SELECT_BLUE = '#2d6cdf';
   var GRID = 20;
   var MIN_W = 70, MIN_H = 48;
@@ -140,6 +141,12 @@ window.TM = window.TM || {};
     if (this.handlers.onZoom) this.handlers.onZoom(this.view.k);
   };
 
+  /** True when anything on the diagram is marked as safety-relevant. */
+  P.hasSafety = function () {
+    var any = this.model.nodes.some(TM.hasSafetyRole);
+    return any || this.model.flows.some(TM.hasSafetyRole);
+  };
+
   /** Bounding box of all nodes in world coordinates. */
   P.contentBounds = function (pad) {
     var nodes = this.model.nodes;
@@ -211,7 +218,7 @@ window.TM = window.TM || {};
     if (this.flowStart) this._renderPendingFlow(overlay);
 
     if (this.showLegend) {
-      var legend = TM.buildLegend();
+      var legend = TM.buildLegend({ safety: this.hasSafety() });
       var rect = svg.getBoundingClientRect();
       legend.setAttribute('transform', 'translate(12,' + Math.max(12, rect.height - 246) + ')');
       legend.setAttribute('opacity', '0.97');
@@ -306,8 +313,40 @@ window.TM = window.TM || {};
         fill: ASSET_FILL, stroke: '#1d4c60', 'stroke-width': 1
       }));
     }
+
+    /* patient-safety badge: this element can act on the patient */
+    if (TM.hasSafetyRole(n) && n.type !== 'boundary') {
+      safetyBadge(g, n.x + 2, n.y - 11, TM.safetyFunctionsOf(n));
+    }
     return g;
   };
+
+  /**
+   * The patient-safety marker: a cross, plus one letter per safety function
+   * (C control, A alarm, S safety stop, D clinical data, T care delivery) so
+   * the diagram shows *how* an element can reach the patient.
+   */
+  function safetyBadge(g, x, y, fns) {
+    var letters = fns.map(function (k) {
+      return { control: 'C', alarm: 'A', safetyStop: 'S', clinicalData: 'D', careDelivery: 'T' }[k] || '?';
+    }).join('');
+    var w = 20 + letters.length * 8;
+    g.appendChild(el('rect', {
+      x: x, y: y, width: w, height: 17, rx: 4,
+      fill: SAFETY_RED, stroke: '#8f1b1b', 'stroke-width': 0.8
+    }));
+    /* cross */
+    g.appendChild(el('path', {
+      d: 'M ' + (x + 8) + ' ' + (y + 4.5) + ' v 8 M ' + (x + 4) + ' ' + (y + 8.5) + ' h 8',
+      stroke: '#ffffff', 'stroke-width': 2.2, 'stroke-linecap': 'round'
+    }));
+    if (letters) {
+      g.appendChild(text(letters, {
+        x: x + 15, y: y + 12.5, 'font-family': FONT, 'font-size': 10.5,
+        'font-weight': 700, fill: '#ffffff', 'letter-spacing': '0.5'
+      }));
+    }
+  }
 
   /** Title + description text stacked inside a node box. */
   P._labels = function (g, n, cx, top, availW, availH, anchor) {
@@ -387,6 +426,10 @@ window.TM = window.TM || {};
         points: (mx + 3) + ',' + (my + 8) + ' ' + (mx + 15) + ',' + (my + 26) + ' ' + (mx - 9) + ',' + (my + 26),
         fill: ASSET_FILL, stroke: '#1d4c60', 'stroke-width': 1
       }));
+    }
+    if (TM.hasSafetyRole(f)) {
+      var fns = TM.safetyFunctionsOf(f);
+      safetyBadge(g, mx - (20 + fns.length * 8) / 2, my + (f.isAsset ? 28 : 8), fns);
     }
     return g;
   };
@@ -800,7 +843,7 @@ window.TM = window.TM || {};
 
     var legendW = 0, legendG = null;
     if (opts.legend !== false) {
-      legendG = TM.buildLegend();
+      legendG = TM.buildLegend({ safety: this.hasSafety() });
       legendW = 232;
       legendG.setAttribute('transform', 'translate(' + (bounds.x + bounds.w + 16) + ',' + (bounds.y + titleH) + ')');
     }
@@ -850,10 +893,16 @@ window.TM = window.TM || {};
   };
 
   /* ------------------------------ legend ------------------------------ */
-  /** The diagram legend, drawn as SVG so it exports with the image. */
-  TM.buildLegend = function () {
+  /**
+   * The diagram legend, drawn as SVG so it exports with the image.
+   * The patient-safety row only appears once something on the diagram is
+   * marked as safety-relevant, so the standard legend stays as it is for a
+   * plain IT threat model.
+   */
+  TM.buildLegend = function (opts) {
+    opts = opts || {};
     var g = el('g', { id: 'tm-legend' });
-    var W = 224, rowH = 34, rows = 6;
+    var W = opts.safety ? 258 : 224, rowH = 34, rows = opts.safety ? 7 : 6;
     var H = 26 + rows * rowH;
     g.appendChild(el('rect', { x: 0, y: 0, width: W, height: H, rx: 5, fill: '#ffffff', stroke: '#d3d9e4', 'stroke-width': 1 }));
     g.appendChild(text('Diagram legend', { x: 10, y: 18, 'font-family': FONT, 'font-size': 12, 'font-weight': 700, fill: INK }));
@@ -866,10 +915,22 @@ window.TM = window.TM || {};
       ['Trust boundary', function (x, y) { return el('rect', { x: x, y: y - 9, width: 44, height: 18, fill: 'none', stroke: BOUNDARY_RED, 'stroke-width': 1.8, 'stroke-dasharray': '5 3' }); }],
       ['Asset', function (x, y) { return el('polygon', { points: (x + 22) + ',' + (y - 10) + ' ' + (x + 38) + ',' + (y + 9) + ' ' + (x + 6) + ',' + (y + 9), fill: ASSET_FILL, stroke: '#1d4c60', 'stroke-width': 1 }); }]
     ];
+    if (opts.safety) {
+      items.push(['Patient safety impact', function (x, y) {
+        var sub = el('g');
+        safetyBadge(sub, x + 2, y - 8, ['control']);
+        return sub;
+      }, 'C control · A alarm · S stop · D data · T care']);
+    }
     items.forEach(function (item, i) {
       var y = 26 + rowH * i + rowH / 2;
       g.appendChild(item[1](12, y));
-      g.appendChild(text(item[0], { x: 68, y: y + 4, 'font-family': FONT, 'font-size': 11.5, fill: INK }));
+      g.appendChild(text(item[0], {
+        x: 68, y: y + (item[2] ? 0 : 4), 'font-family': FONT, 'font-size': 11.5, fill: INK
+      }));
+      if (item[2]) {
+        g.appendChild(text(item[2], { x: 68, y: y + 11, 'font-family': FONT, 'font-size': 9, fill: MUTED }));
+      }
     });
     return g;
   };

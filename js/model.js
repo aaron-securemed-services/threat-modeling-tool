@@ -75,6 +75,90 @@ window.TM = window.TM || {};
   TM.NODE_TYPES = ['boundary', 'entity', 'process', 'datastore', 'asset'];
 
   /* ---------------------------------------------------------------------
+   * Patient safety
+   *
+   * A security threat to a medical device matters because of what it can do
+   * to the patient. These are the safety-relevant functions an element can
+   * carry; they decide which safety hazards are analysed for it, and they are
+   * what the report traces back to the safety risk management file
+   * (ISO 14971) so a security finding can be reconciled with a hazard.
+   * ------------------------------------------------------------------- */
+  TM.SAFETY_FUNCTIONS = [
+    {
+      key: 'control',
+      label: 'Controls or actuates therapy / diagnosis',
+      short: 'Device control',
+      help: 'Issues, carries or executes commands that act on the patient: dose, rate, energy, motion, stimulation, imaging exposure.',
+      harm: 'Unintended, altered or withheld therapy delivered to the patient.'
+    },
+    {
+      key: 'alarm',
+      label: 'Generates, carries or displays alarms',
+      short: 'Alarms',
+      help: 'Alarm conditions, thresholds, annunciation or escalation to a clinician.',
+      harm: 'A real alarm is missed or suppressed, or false alarms drive alarm fatigue and unnecessary intervention.'
+    },
+    {
+      key: 'safetyStop',
+      label: 'Implements a safety stop, interlock or limit',
+      short: 'Safety stop',
+      help: 'Hard or soft limits, dose caps, watchdogs, emergency stop, fail-safe state, interlocks.',
+      harm: 'The protective function does not engage, or engages when it should not, removing the last barrier before harm.'
+    },
+    {
+      key: 'clinicalData',
+      label: 'Produces clinical data used for decisions',
+      short: 'Clinical data',
+      help: 'Measurements, images, results or records a clinician acts on.',
+      harm: 'A clinical decision is made on wrong, stale or missing data.'
+    },
+    {
+      key: 'careDelivery',
+      label: 'Needed for timely care delivery',
+      short: 'Care delivery',
+      help: 'Loss of this element delays or prevents treatment even though nothing is directly actuated.',
+      harm: 'Care is delayed or cannot be delivered.'
+    }
+  ];
+
+  TM.safetyFunction = function (key) {
+    for (var i = 0; i < TM.SAFETY_FUNCTIONS.length; i++) {
+      if (TM.SAFETY_FUNCTIONS[i].key === key) return TM.SAFETY_FUNCTIONS[i];
+    }
+    return null;
+  };
+
+  /** The safety functions an element declares. */
+  TM.safetyFunctionsOf = function (el) {
+    var v = el && el.props && el.props.safetyFunctions;
+    return Array.isArray(v) ? v.filter(function (k) { return !!TM.safetyFunction(k); }) : [];
+  };
+
+  TM.hasSafetyRole = function (el) {
+    return TM.safetyFunctionsOf(el).length > 0;
+  };
+
+  /** ISO 14971-style severity of harm, least to most severe. */
+  TM.HARM_SEVERITY = [
+    'None (no patient harm credible)',
+    'Negligible — inconvenience or temporary discomfort',
+    'Minor — temporary injury, no professional intervention',
+    'Serious — injury needing professional intervention',
+    'Critical — permanent impairment or life-threatening injury',
+    'Catastrophic — patient death'
+  ];
+
+  /** Points a severity of harm contributes when scoring a safety threat. */
+  TM.HARM_SEVERITY_POINTS = {
+    'None (no patient harm credible)': 0,
+    'Negligible — inconvenience or temporary discomfort': 0,
+    'Minor — temporary injury, no professional intervention': 0.5,
+    'Serious — injury needing professional intervention': 1,
+    'Critical — permanent impairment or life-threatening injury': 1.5,
+    'Catastrophic — patient death': 2
+  };
+
+  /* ---------------------------------------------------------------------
    * Category catalogue.
    *
    * Each field: { key, label, help, type, options[], default, appliesTo[] }
@@ -99,6 +183,51 @@ window.TM = window.TM || {};
       group: 'Data',
       help: 'How much the business hurts if this element is unavailable.',
       options: [UNSET, 'Low', 'Medium', 'High', 'Critical (safety / life)'],
+      appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
+    },
+
+    /* ---- patient safety (medical device context) ---- */
+    {
+      key: 'safetyFunctions',
+      label: 'Safety-relevant functions',
+      group: 'Patient safety',
+      type: 'multi',
+      help: 'What this element does that can reach the patient. Tick everything that applies — each one is analysed for the safety hazards a security compromise could create.',
+      options: TM.SAFETY_FUNCTIONS.map(function (f) {
+        return { value: f.key, label: f.label, help: f.help };
+      }),
+      appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
+    },
+    {
+      key: 'harmSeverity',
+      label: 'Worst-case severity of harm',
+      group: 'Patient safety',
+      help: 'If a compromise here reaches the patient, how bad is the worst credible outcome? Use the same scale as your safety risk management file.',
+      options: [UNSET].concat(TM.HARM_SEVERITY),
+      appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
+    },
+    {
+      key: 'softwareSafetyClass',
+      label: 'Software safety class (IEC 62304)',
+      group: 'Patient safety',
+      help: 'The class assigned to this software item, if it is software.',
+      options: [UNSET, 'Not software', 'Class A — no injury possible', 'Class B — non-serious injury possible', 'Class C — death or serious injury possible'],
+      appliesTo: ['process', 'datastore', 'flow']
+    },
+    {
+      key: 'safetyFileRef',
+      label: 'Safety file reference',
+      group: 'Patient safety',
+      type: 'text',
+      help: 'Hazard, hazardous situation or risk control IDs in the safety risk management file (e.g. HAZ-014, RC-032). Printed in the traceability matrix.',
+      appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
+    },
+    {
+      key: 'safetyNotes',
+      label: 'Hazardous situation',
+      group: 'Patient safety',
+      type: 'textarea',
+      help: 'In your own words: how does a compromise of this element reach the patient? Quoted in the safety traceability matrix.',
       appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
     },
 
@@ -288,6 +417,7 @@ window.TM = window.TM || {};
 
   /** True when a category has not been answered yet. */
   TM.isUnset = function (value) {
+    if (Array.isArray(value)) return value.length === 0;
     return value === undefined || value === null || value === '' || value === UNSET;
   };
 
@@ -308,7 +438,11 @@ window.TM = window.TM || {};
         system: '',
         author: '',
         date: new Date().toISOString().slice(0, 10),
-        scope: ''
+        scope: '',
+        /* The safety risk management file this security analysis feeds. */
+        safetyDoc: '',
+        safetyDocRef: '',
+        intendedUse: ''
       },
       nodes: [],
       flows: [],
@@ -441,6 +575,7 @@ window.TM = window.TM || {};
     ruleScores: {},
     categoryPoints: { S: 0, T: 0, R: 0, I: 0, D: 0, E: 0 },
     aggravatorPoints: {
+      patientSafety: 0.5,        /* the threat can reach the patient */
       sensitiveData: 0.5,        /* confidential or regulated data */
       externalExposure: 0.5,     /* internet / anonymous facing, or an external boundary crossing */
       markedAsset: 0.5,          /* the element is flagged as an asset */
@@ -450,10 +585,13 @@ window.TM = window.TM || {};
       publicData: 0.5,
       lowAvailabilityNeed: 0.5
     },
+    /* Extra points for a patient-safety threat, by worst-case severity of harm. */
+    harmSeverityPoints: null,    /* filled from TM.HARM_SEVERITY_POINTS below */
     cvss: { useWhenPresent: true }
   };
+  TM.DEFAULT_SCORING.harmSeverityPoints = TM.HARM_SEVERITY_POINTS;
 
-  var AGGRAVATORS = ['sensitiveData', 'externalExposure', 'markedAsset', 'safetyCriticalDoS'];
+  var AGGRAVATORS = ['patientSafety', 'sensitiveData', 'externalExposure', 'markedAsset', 'safetyCriticalDoS'];
   var MITIGATORS = ['publicData', 'lowAvailabilityNeed'];
 
   function isNum(v) { return typeof v === 'number' && isFinite(v); }
@@ -545,6 +683,26 @@ window.TM = window.TM || {};
       if (!isNum(v)) { errors.push('mitigatorPoints.' + k + ' must be a number.'); p.mitigatorPoints[k] = d.mitigatorPoints[k]; return; }
       p.mitigatorPoints[k] = v;
     });
+
+    /* severity-of-harm weighting */
+    p.harmSeverityPoints = {};
+    TM.HARM_SEVERITY.forEach(function (level) {
+      var v = raw.harmSeverityPoints && raw.harmSeverityPoints[level];
+      if (v === undefined) { p.harmSeverityPoints[level] = TM.HARM_SEVERITY_POINTS[level]; return; }
+      if (!isNum(v)) {
+        errors.push('harmSeverityPoints["' + level + '"] must be a number.');
+        p.harmSeverityPoints[level] = TM.HARM_SEVERITY_POINTS[level];
+        return;
+      }
+      p.harmSeverityPoints[level] = v;
+    });
+    if (raw.harmSeverityPoints && typeof raw.harmSeverityPoints === 'object') {
+      Object.keys(raw.harmSeverityPoints).forEach(function (k) {
+        if (TM.HARM_SEVERITY.indexOf(k) === -1) {
+          warnings.push('harmSeverityPoints["' + k + '"] is not one of the severity-of-harm levels, so it will be ignored.');
+        }
+      });
+    }
 
     if (raw.cvss && typeof raw.cvss === 'object' && raw.cvss.useWhenPresent !== undefined) {
       p.cvss.useWhenPresent = !!raw.cvss.useWhenPresent;

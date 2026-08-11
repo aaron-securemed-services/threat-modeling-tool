@@ -1,0 +1,699 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "name": "Connected infusion pump (worked example)",
+    "system": "Large-volume infusion pump with hospital connectivity and a vendor cloud service",
+    "author": "Teaching example",
+    "date": "2026-08-11",
+    "intendedUse": "Continuous and bolus intravenous delivery of medication to adult and paediatric inpatients, programmed at the bedside or by auto-programming from the EHR, under the supervision of clinical staff.",
+    "scope": "In scope: the pump controller and its dose-limit interlock, the alarm path to the nurse call system, the hospital gateway, the drug library service and the vendor telemetry cloud. Out of scope: the EHR itself, hospital network infrastructure, and physical security of the ward.",
+    "safetyDoc": "Infusion Pump Risk Management File (ISO 14971)",
+    "safetyDocRef": "RMF-IP-2200 rev C"
+  },
+  "nodes": [
+    {
+      "id": "boundary-msox8623-1",
+      "type": "boundary",
+      "x": 40,
+      "y": 60,
+      "w": 420,
+      "h": 560,
+      "title": "Pump enclosure (device)",
+      "description": "The physical device: firmware, actuator and local user interface.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "boundaryKind": "Machine / process boundary"
+      }
+    },
+    {
+      "id": "boundary-msox8623-2",
+      "type": "boundary",
+      "x": 500,
+      "y": 60,
+      "w": 400,
+      "h": 560,
+      "title": "Hospital network",
+      "description": "The clinical network the pump joins over Wi-Fi.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "boundaryKind": "Network segment"
+      }
+    },
+    {
+      "id": "boundary-msox8623-3",
+      "type": "boundary",
+      "x": 940,
+      "y": 60,
+      "w": 340,
+      "h": 560,
+      "title": "Vendor cloud",
+      "description": "Manufacturer-operated telemetry and fleet management service.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "boundaryKind": "Third-party or vendor"
+      }
+    },
+    {
+      "id": "process-msox8623-4",
+      "type": "process",
+      "x": 90,
+      "y": 140,
+      "w": 190,
+      "h": 96,
+      "title": "Pump controller",
+      "description": "Firmware that computes and drives the infusion rate.",
+      "isAsset": true,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-001, HAZ-004, RC-011",
+        "safetyNotes": "Over-infusion of a high-alert medication. The controller drives the actuator directly, so any altered rate or programme becomes delivered therapy within one pump cycle.",
+        "exposure": "Internal network",
+        "privilege": "Elevated service account",
+        "inputValidation": "Partial / deny-list",
+        "resilience": "Timeouts only",
+        "authentication": "Shared secret or API key",
+        "authorization": "Simple ownership check",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)",
+        "owner": "Device firmware team"
+      }
+    },
+    {
+      "id": "process-msox8623-5",
+      "type": "process",
+      "x": 90,
+      "y": 290,
+      "w": 190,
+      "h": 88,
+      "title": "Dose limit interlock",
+      "description": "Independent hard-limit check before actuation.",
+      "isAsset": true,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "RC-011, RC-012",
+        "safetyNotes": "This is the last barrier between a wrong programmed dose and the patient. If its limits are widened, or it does not get to run, nothing else stops an unsafe infusion.",
+        "exposure": "Internal network",
+        "privilege": "Least privilege",
+        "inputValidation": "Partial / deny-list",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "Shared credential for everyone",
+        "logging": "None",
+        "dataClassification": "Internal",
+        "criticality": "Critical (safety / life)",
+        "owner": "Device firmware team"
+      }
+    },
+    {
+      "id": "process-msox8623-6",
+      "type": "process",
+      "x": 90,
+      "y": 430,
+      "w": 190,
+      "h": 88,
+      "title": "Alarm manager",
+      "description": "Detects alarm conditions and annunciates locally and remotely.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "alarm"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-007",
+        "safetyNotes": "Occlusion, air-in-line and infusion-complete alarms. A suppressed alarm means deterioration goes unnoticed; injected false alarms cause alarm fatigue on the ward.",
+        "exposure": "Internal network",
+        "privilege": "Least privilege",
+        "inputValidation": "None",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "Errors only",
+        "dataClassification": "Confidential",
+        "criticality": "Critical (safety / life)",
+        "owner": "Device firmware team"
+      }
+    },
+    {
+      "id": "datastore-msox8623-7",
+      "type": "datastore",
+      "x": 90,
+      "y": 540,
+      "w": 190,
+      "h": 66,
+      "title": "Drug library (on device)",
+      "description": "Dose limits and concentrations per medication.",
+      "isAsset": true,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "RC-012",
+        "safetyNotes": "The limits the interlock enforces. Tampering here silently widens what the pump will accept as a legitimate dose.",
+        "storeKind": "File share",
+        "encryptionAtRest": "None",
+        "integrity": "None",
+        "backup": "Tested backups with retention",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "None",
+        "dataClassification": "Internal",
+        "criticality": "Critical (safety / life)",
+        "owner": "Pharmacy informatics"
+      }
+    },
+    {
+      "id": "entity-msox8623-8",
+      "type": "entity",
+      "x": 540,
+      "y": 140,
+      "w": 170,
+      "h": 74,
+      "title": "Nurse (bedside)",
+      "description": "Programmes the infusion at the pump and responds to alarms.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control",
+          "careDelivery"
+        ],
+        "harmSeverity": "Serious — injury needing professional intervention",
+        "safetyFileRef": "HAZ-002",
+        "safetyNotes": "Use error and spoofed identity both end in a wrong programme reaching the pump.",
+        "entityKind": "Human user",
+        "trustLevel": "Semi-trusted (authenticated)",
+        "authentication": "Username + password",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "owner": "Clinical engineering"
+      }
+    },
+    {
+      "id": "entity-msox8623-9",
+      "type": "entity",
+      "x": 540,
+      "y": 250,
+      "w": 170,
+      "h": 74,
+      "title": "Biomed / service tech",
+      "description": "Services the pump and updates the drug library.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "safetyFileRef": "HAZ-009",
+        "safetyNotes": "Holds the credentials that can change dose limits and disable interlocks.",
+        "entityKind": "Privileged user / administrator",
+        "trustLevel": "Semi-trusted (authenticated)",
+        "authentication": "Shared secret or API key",
+        "logging": "None",
+        "dataClassification": "Internal",
+        "criticality": "High",
+        "owner": "Clinical engineering"
+      }
+    },
+    {
+      "id": "process-msox8623-a",
+      "type": "process",
+      "x": 540,
+      "y": 370,
+      "w": 190,
+      "h": 92,
+      "title": "Hospital gateway",
+      "description": "Bridges pumps to hospital systems and the vendor cloud.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control",
+          "alarm",
+          "careDelivery"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "softwareSafetyClass": "Class B — non-serious injury possible",
+        "safetyFileRef": "HAZ-004, HAZ-007",
+        "safetyNotes": "Carries auto-programming orders towards the pump and alarms away from it. A compromise here reaches every pump on the ward at once.",
+        "exposure": "Internal network",
+        "privilege": "Elevated service account",
+        "inputValidation": "None",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)",
+        "owner": "Hospital IT"
+      }
+    },
+    {
+      "id": "process-msox8623-b",
+      "type": "process",
+      "x": 540,
+      "y": 500,
+      "w": 190,
+      "h": 88,
+      "title": "Nurse call system",
+      "description": "Escalates device alarms to staff handsets.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "alarm",
+          "careDelivery"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "softwareSafetyClass": "Class B — non-serious injury possible",
+        "safetyFileRef": "HAZ-007, RC-021",
+        "safetyNotes": "The remote half of the alarm path. If alarms are delayed or lost here, the bedside alarm is the only remaining barrier.",
+        "exposure": "Internal network",
+        "privilege": "Least privilege",
+        "inputValidation": "Partial / deny-list",
+        "resilience": "Timeouts only",
+        "authentication": "Shared secret or API key",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Security events logged",
+        "dataClassification": "Confidential",
+        "criticality": "Critical (safety / life)",
+        "owner": "Hospital IT"
+      }
+    },
+    {
+      "id": "process-msox8623-c",
+      "type": "process",
+      "x": 980,
+      "y": 190,
+      "w": 190,
+      "h": 92,
+      "title": "Vendor fleet service",
+      "description": "Telemetry, drug library distribution and firmware updates.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop",
+          "control"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-011",
+        "safetyNotes": "Distributes the drug library and firmware to the whole fleet. A compromise is a fleet-wide safety event, not a single-device one.",
+        "exposure": "Internet-facing",
+        "privilege": "Elevated service account",
+        "inputValidation": "Partial / deny-list",
+        "resilience": "Rate limiting / quotas",
+        "authentication": "Session token / JWT",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Security events logged",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "owner": "Vendor cloud team"
+      }
+    },
+    {
+      "id": "datastore-msox8623-d",
+      "type": "datastore",
+      "x": 980,
+      "y": 350,
+      "w": 190,
+      "h": 66,
+      "title": "Telemetry & event store",
+      "description": "Infusion events, alarms and device logs.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "clinicalData"
+        ],
+        "harmSeverity": "Minor — temporary injury, no professional intervention",
+        "softwareSafetyClass": "Class A — no injury possible",
+        "safetyFileRef": "HAZ-013",
+        "storeKind": "Object / blob storage",
+        "encryptionAtRest": "Full-disk / volume",
+        "integrity": "None",
+        "backup": "Backups, never tested",
+        "authentication": "Session token / JWT",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium",
+        "owner": "Vendor cloud team"
+      }
+    },
+    {
+      "id": "asset-msox8623-e",
+      "type": "asset",
+      "x": 990,
+      "y": 480,
+      "w": 100,
+      "h": 86,
+      "title": "Patient",
+      "description": "",
+      "isAsset": true,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control",
+          "careDelivery"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "safetyFileRef": "RMF-IP-2200",
+        "safetyNotes": "The asset every other control exists to protect.",
+        "assetKind": "Physical",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)",
+        "owner": "Clinical service"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow-msox8623-f",
+      "type": "flow",
+      "from": "entity-msox8623-8",
+      "to": "process-msox8623-4",
+      "bidirectional": false,
+      "title": "Programme infusion",
+      "description": "Rate, dose and duration entered at the bedside.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-002",
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "Username + password",
+        "authorization": "Simple ownership check",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msox8623-g",
+      "type": "flow",
+      "from": "process-msox8623-a",
+      "to": "process-msox8623-4",
+      "bidirectional": false,
+      "title": "Auto-programming order",
+      "description": "Pharmacy order pushed to the pump from the EHR.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-004",
+        "protocol": "HTTP (cleartext)",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msox8623-h",
+      "type": "flow",
+      "from": "process-msox8623-4",
+      "to": "process-msox8623-5",
+      "bidirectional": true,
+      "title": "Requested rate check",
+      "description": "Every programmed rate is checked against the hard limits.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "safetyFileRef": "RC-011",
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Internal",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msox8623-i",
+      "type": "flow",
+      "from": "datastore-msox8623-7",
+      "to": "process-msox8623-5",
+      "bidirectional": false,
+      "title": "Dose limits",
+      "description": "Limits the interlock enforces.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "safetyFileRef": "RC-012",
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "Timeouts only",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Internal",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msox8623-j",
+      "type": "flow",
+      "from": "process-msox8623-4",
+      "to": "process-msox8623-6",
+      "bidirectional": false,
+      "title": "Alarm conditions",
+      "description": "Occlusion, air-in-line, battery and completion events.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "alarm"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "safetyFileRef": "HAZ-007",
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "Errors only",
+        "dataClassification": "Confidential",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msox8623-k",
+      "type": "flow",
+      "from": "process-msox8623-6",
+      "to": "process-msox8623-b",
+      "bidirectional": false,
+      "title": "Remote alarm escalation",
+      "description": "Alarms forwarded to staff handsets.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "alarm"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "safetyFileRef": "HAZ-007, RC-021",
+        "protocol": "HTTP (cleartext)",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "Shared secret or API key",
+        "authorization": "None",
+        "logging": "Errors only",
+        "dataClassification": "Confidential",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msox8623-l",
+      "type": "flow",
+      "from": "entity-msox8623-9",
+      "to": "datastore-msox8623-7",
+      "bidirectional": false,
+      "title": "Drug library update",
+      "description": "Service tooling writes new dose limits to the pump.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "safetyFileRef": "HAZ-009",
+        "protocol": "SMB / NFS file share",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "None",
+        "dataClassification": "Internal",
+        "criticality": "High"
+      }
+    },
+    {
+      "id": "flow-msox8623-m",
+      "type": "flow",
+      "from": "process-msox8623-c",
+      "to": "process-msox8623-a",
+      "bidirectional": false,
+      "title": "Drug library & firmware distribution",
+      "description": "Fleet-wide updates pushed to the hospital.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "safetyStop",
+          "control"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-011",
+        "protocol": "HTTPS / TLS",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "Timeouts only",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "Security events logged",
+        "dataClassification": "Internal",
+        "criticality": "High"
+      }
+    },
+    {
+      "id": "flow-msox8623-n",
+      "type": "flow",
+      "from": "process-msox8623-a",
+      "to": "process-msox8623-c",
+      "bidirectional": false,
+      "title": "Device telemetry",
+      "description": "Infusion and alarm events sent to the vendor.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "clinicalData"
+        ],
+        "harmSeverity": "Minor — temporary injury, no professional intervention",
+        "safetyFileRef": "HAZ-013",
+        "protocol": "HTTPS / TLS",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "Timeouts only",
+        "authentication": "Shared secret or API key",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-msox8623-o",
+      "type": "flow",
+      "from": "process-msox8623-c",
+      "to": "datastore-msox8623-d",
+      "bidirectional": false,
+      "title": "Store events",
+      "description": "Telemetry written to the event store.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "HTTPS / TLS",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "Rate limited / throttled",
+        "authentication": "Session token / JWT",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-msox8623-p",
+      "type": "flow",
+      "from": "process-msox8623-6",
+      "to": "entity-msox8623-8",
+      "bidirectional": false,
+      "title": "Bedside annunciation",
+      "description": "Audible and visual alarm at the pump.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "alarm"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "safetyFileRef": "RC-021",
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "Timeouts only",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Confidential",
+        "criticality": "Critical (safety / life)"
+      }
+    }
+  ],
+  "scoring": null,
+  "assessments": {
+    "process-msox8623-4::safe-control-t": {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:H/SA:H/S:P/AU:Y",
+      "score": 9.4,
+      "severity": "Critical",
+      "rationale": "Scored with the clinical engineering team; S:P set because the subsequent system impact is the patient.",
+      "updated": "2026-08-11"
+    }
+  }
+}

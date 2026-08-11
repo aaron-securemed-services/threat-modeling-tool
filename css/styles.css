@@ -211,7 +211,37 @@ html, body {
   margin-bottom: 12px;
 }
 .props .stride-hint b { color: var(--ink); }
+.props .safety-hint { background: #fdf1f1; border-left-color: var(--danger); }
 .prop-actions { display: flex; gap: 6px; margin-top: 6px; }
+
+/* patient safety block in the properties panel */
+.props fieldset.fieldset-safety {
+  border-color: #f0c4c4;
+  background: #fdf7f7;
+}
+.props fieldset.fieldset-safety legend { color: #a13030; }
+.multi-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+/* specific enough to beat the generic ".field label { display:block }" rule */
+.field label.multi-option {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-bottom: 0;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--ink);
+  text-transform: none;
+  cursor: pointer;
+}
+.multi-option input { margin-top: 2px; flex: none; }
+.multi-label { display: block; font-size: 12px; line-height: 1.3; }
+.multi-help { display: block; font-size: 10.5px; color: var(--ink-soft); line-height: 1.35; margin-top: 1px; }
+
+.safety-flag {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 20px;
+  background: #fbe2e2; color: #8f1b1b;
+}
 
 .tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .tag-list .tag {
@@ -338,6 +368,18 @@ html, body {
 .finding-info     { border-left-color: #7d8ba6; }
 .finding-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
 .finding-head strong { font-size: 13px; }
+.report .safety-callout {
+  background: #fdf1f1; border-left: 3px solid var(--danger);
+  padding: 9px 12px; border-radius: 4px; margin: 10px 0;
+}
+.safety-panel {
+  margin-top: 7px; padding: 7px 10px; border-radius: 4px;
+  background: #fdf5f5; border: 1px solid #f2d3d3; font-size: 12.5px;
+}
+.safety-panel .safety-head { margin-bottom: 3px; }
+.safety-panel > div { margin: 2px 0; }
+.missing-trace { color: var(--danger); font-weight: 600; }
+
 .finding .mitig { margin-top: 5px; }
 .finding .mitig b { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
 

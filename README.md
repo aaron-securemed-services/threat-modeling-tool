@@ -1,9 +1,13 @@
 # STRIDE Threat Modeling Tool
 
-A browser-based tool for **teaching threat modeling**. Students draw a data flow diagram
-using the standard legend, annotate each element with a handful of security categories,
-export the diagram as an image, and generate a STRIDE report that explains which threats
-apply, why, and what to do about them.
+A browser-based tool for **teaching medical device cybersecurity**. Students draw a data
+flow diagram using the standard legend, annotate each element with security categories
+**and what it can do to the patient**, export the diagram as an image, and generate a
+STRIDE report that explains which threats apply, why, what harm they could cause, and how
+each one traces back to the safety risk management file.
+
+It works just as well for ordinary IT threat modeling — the patient safety layer only
+appears once you mark something as safety-relevant.
 
 No build step, no server, no dependencies — open `index.html` in a browser.
 
@@ -19,8 +23,10 @@ Or serve it (handy for a classroom on one machine):
 npx http-server -p 8080 .
 ```
 
-The tool starts with a **worked example** — a patient portal, deliberately imperfect, so
-the first report a student sees has something to say in every STRIDE category.
+The tool starts with a **worked example** — a connected infusion pump, deliberately
+imperfect, so the first report a student sees has something to say in every STRIDE category
+and in all three patient-safety classes. `examples/` also holds a patient-portal model for
+the plain healthcare-IT case.
 
 ---
 
@@ -85,6 +91,7 @@ its inputs.
 | Group | Category | Asked of |
 | --- | --- | --- |
 | Data | Data classification, Availability need | all elements |
+| Patient safety | Safety-relevant functions, Severity of harm, Software safety class, Safety file reference, Hazardous situation | all elements |
 | Classification | Entity kind, Trust level | entities |
 | Classification | Exposure, Runtime privilege | processes |
 | Classification | Store kind | data stores |
@@ -96,19 +103,91 @@ its inputs.
 | Controls | Encryption at rest, Integrity controls, Backup / recovery | data stores |
 | Controls | Encryption in transit, Message integrity, Throttling | data flows |
 
+### 2a. Patient safety — what a compromise does to the patient
+
+This is what separates a medical device threat model from an IT one. A security threat
+matters here because of where it ends: **in the patient**. For each element, tick the
+safety-relevant functions it performs:
+
+| Function | Badge | What a compromise does to the patient |
+| --- | --- | --- |
+| Controls or actuates therapy / diagnosis | **C** | Unintended, altered or withheld therapy — wrong dose, rate, energy or motion |
+| Generates, carries or displays alarms | **A** | A real alarm is suppressed or missed, or false alarms drive alarm fatigue and unnecessary intervention |
+| Implements a safety stop, interlock or limit | **S** | The last barrier before harm does not engage — or engages when it should not |
+| Produces clinical data used for decisions | **D** | A clinical decision is made on wrong, stale or missing data |
+| Needed for timely care delivery | **T** | Care is delayed or cannot be delivered |
+
+The first three are the classes this tool is built to highlight: **control of the device in
+a way that could harm the patient**, **incorrect alarms**, and **degradation of implemented
+safety stops**.
+
+Then set the worst-case **severity of harm** (an ISO 14971-style scale from *Negligible* to
+*Catastrophic — patient death*), the **IEC 62304 software safety class**, the
+**hazardous situation** in your own words, and the **safety file reference** — the hazard or
+risk control ID in your risk management file.
+
+Elements that can reach the patient get a red badge on the diagram carrying a letter per
+function, and the legend gains a row explaining them. Nothing changes for a diagram with no
+safety-relevant elements.
+
+Each safety function is then analysed for the hazards a security compromise creates, across
+the STRIDE categories that can apply to it. For example, a **safety stop** is analysed for:
+
+- **Tampering** — its limits or interlock configuration can be modified, so the protective
+  function is still present but no longer constrains anything;
+- **Elevation of privilege** — the override, service or maintenance path is reachable by
+  someone who should not have it;
+- **Denial of service** — the watchdog or monitor is starved and simply never runs in time.
+
+Every safety finding states the **hazardous situation**, the **harm** in clinical terms, the
+severity of harm, and a hazard reference (`SEC-HAZ-nnn`), alongside candidate risk controls.
+
+### 2b. Tracing to the safety risk management file
+
+Section 5 of the report is a **security-to-safety traceability matrix**: one row per threat
+with a credible path to patient harm.
+
+| Hazard ref | Threat | Element | STRIDE | Safety impact | Hazardous situation → harm | Severity of harm | Severity | Safety file ref |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| SEC-HAZ-006 | T-19 | Dose limit interlock | T | Safety stop | Safety limits or interlock configuration can be modified → the last barrier before harm is removed | Catastrophic | CRITICAL | RC-011, RC-012 |
+
+Download it on its own as **Safety trace .csv** — a wider matrix with the hazardous
+situation, candidate risk controls, controls already in place, CVSS vector, and both
+document references, ready to paste into or reference from the risk management file.
+
+The section also lists:
+
+- **Safety-relevant elements with no threat raised** — a result, not an absence of one.
+  These belong in the safety file as justified residual risks.
+- **Breaks in the trace** — elements that can reach the patient but have no severity of
+  harm or no safety file reference, so the security finding cannot be reconciled with a
+  hazard. Missing references are printed in red in the matrix itself.
+
+Set the risk management file's name and document ID under *Threat model details* (deselect
+everything on the canvas) and both are printed on the report and in the trace CSV, so the
+two documents can always be reconciled.
+
+Severity of harm also feeds the rating: a patient-safety threat scores extra points, and
+more of them the worse the credible harm. That is why a tampering threat against a dose
+limit on a device that can kill comes out **Critical** while the same rule against a
+telemetry store comes out lower — see *Score the threats* below, all of it configurable.
+
 ### 3. Generate the report
 
 Press **STRIDE report**. The report contains:
 
-1. **Summary** — counts by risk rating and by STRIDE category.
-2. **Diagram inventory** — trust boundaries, elements and flows with their annotations.
+1. **Summary** — counts by severity and STRIDE category, and how many threats affect
+   patient safety, broken down by safety impact.
+2. **Diagram inventory** — trust boundaries, elements and flows with their annotations,
+   safety impact and severity of harm.
 3. **STRIDE coverage matrix** — element × STRIDE, showing which categories applied and
    how many threats were raised, so students can see the systematic sweep.
 4. **Threats and mitigations** — each finding with its STRIDE category, the security
-   property it violates, a risk rating, the threat in plain language, and concrete
-   mitigations.
-5. **Coverage gaps** — the questions nobody answered.
-6. **Appendices** — a STRIDE reference table and an explanation of the risk rating.
+   property it violates, a severity, the threat in plain language, concrete mitigations,
+   and for safety threats the harm, severity of harm and safety file reference.
+5. **Patient safety traceability** — the matrix described above.
+6. **Coverage gaps** — the questions nobody answered.
+7. **Appendices** — a STRIDE reference table and an explanation of the severity rating.
 
 Download it as **Markdown**, **HTML**, or **CSV** (one row per threat, drops straight into
 a risk register), or print to PDF.
@@ -133,16 +212,22 @@ all score the same way, and the report's Appendix B prints the arithmetic in ful
   ],
   "baseScores":       { "info": 1, "low": 2, "medium": 3, "high": 4, "critical": 6 },
   "categoryPoints":   { "I": 0.5, "E": 0.5 },   // weight STRIDE categories differently
-  "aggravatorPoints": { "sensitiveData": 0.5, "externalExposure": 0.5,
-                        "markedAsset": 0.5, "safetyCriticalDoS": 0.5 },
+  "aggravatorPoints": { "patientSafety": 0.5, "sensitiveData": 0.5,
+                        "externalExposure": 0.5, "markedAsset": 0.5,
+                        "safetyCriticalDoS": 0.5 },
   "mitigatorPoints":  { "publicData": 0.5, "lowAvailabilityNeed": 0.5 },
+  "harmSeverityPoints": {                       // weight by how bad the harm could be
+    "Serious — injury needing professional intervention": 1,
+    "Catastrophic — patient death": 2
+  },
   "ruleScores":       { "ds-i-rest": 6 },       // override individual rules by id
   "cvss":             { "useWhenPresent": true }
 }
 ```
 
 Score = base rating of the rule + category points + aggravating context − mitigating
-context, mapped onto the highest level whose `min` it reaches. Invalid profiles are
+context + severity of harm (for patient-safety threats), mapped onto the highest level
+whose `min` it reaches. Invalid profiles are
 rejected with a specific reason rather than silently half-applied, and a bad profile inside
 a model file never stops the file from opening.
 
@@ -190,6 +275,14 @@ that can apply to it:
 Trust boundaries are context rather than a target: they are not analysed directly, they
 raise the risk of every flow that crosses them.
 
+On top of that, every safety-relevant function an element declares is analysed for the
+patient-safety hazards a compromise creates, in the STRIDE categories where that makes
+sense — device control under S/T/R/D/E, alarms under S/T/R/D, safety stops under T/E/D.
+This is the layer the standards are asking for: MDCG 2019-16 and IEC 81001-5-1 both
+require security risk management to be integrated with safety risk management under
+ISO 14971, and FDA guidance asks for exploitability and **impact on patient safety** to be
+assessed together rather than for security to be scored on its own.
+
 Some threats belong to an element but are only visible on a flow — an unauthenticated
 inbound call, for example, is a *spoofing* problem for the process receiving it. Those
 findings are attached to the receiving element and cite the flow they came in on.
@@ -214,16 +307,34 @@ A workable 90-minute session:
 
 1. **Legend first (10 min).** Open the example, walk the six shapes, toggle the legend on
    the diagram.
-2. **Draw together (20 min).** Build a diagram of a system the group knows. Insist on
+2. **Draw together (20 min).** Build a diagram of a device the group knows. Insist on
    descriptions — "what does this actually do?" surfaces more than the shapes do.
 3. **Boundaries (10 min).** Add trust boundaries and watch which flows go dashed. Ask
    what changes when a box moves across a boundary.
 4. **Annotate in pairs (20 min).** Half the room fills in one subsystem, half another.
    The arguments about *which* option to pick are the learning.
-5. **Report (20 min).** Generate it, sort by risk, and challenge the ratings — the tool is
-   wrong about something, and finding out why is the exercise.
-6. **Gaps (10 min).** Section 5 lists everything nobody answered. Discuss what it would
+5. **Report (20 min).** Generate it, sort by severity, and challenge the ratings — the tool
+   is wrong about something, and finding out why is the exercise.
+6. **Gaps (10 min).** Section 6 lists everything nobody answered. Discuss what it would
    take to answer them, and who would have to be in the room.
+
+A second session on patient safety, which is where the medical device content lives:
+
+1. **Three questions per element (20 min).** Could a compromise here control the device in
+   a way that harms the patient? Could it cause incorrect alarms — real ones suppressed or
+   false ones injected? Could it degrade a safety stop? Make them answer "no" out loud
+   rather than leaving a blank; a recorded "no" is a finding too.
+2. **Severity of harm (15 min).** Set it per element. The argument about whether a
+   suppressed alarm is *Critical* or *Catastrophic* is the same argument the safety team
+   has, and having it in the security session is the point.
+3. **Trace it (25 min).** Generate the report, open section 5, and export the safety trace
+   CSV. Have each pair take three hazard references and write what the corresponding entry
+   in the risk management file would say.
+4. **Break the trace deliberately (15 min).** Clear a safety file reference and regenerate.
+   The row turns red under "breaks in the trace". Discuss why an auditor cares.
+5. **Controls that create hazards (15 min).** Pick a mitigation from the report — a lockout,
+   a forced update, a rate limit — and ask what new safety risk it introduces. Security
+   controls on a medical device are themselves design changes with their own hazards.
 
 ---
 
@@ -233,16 +344,16 @@ A workable 90-minute session:
 index.html            app shell and layout
 css/styles.css        application chrome (the diagram styles itself inline, so exports are self-contained)
 js/model.js           data model, the category catalogue, save/load, undo history
-js/stride.js          STRIDE knowledge base, rule catalogue and the analysis engine
+js/stride.js          STRIDE knowledge base, security + patient-safety rules, analysis engine
 js/diagram.js         SVG canvas: shapes, direct manipulation, SVG/PNG export
 js/report.js          HTML / Markdown / CSV report generation
 js/app.js             UI wiring, properties panel, file IO, worked example
-examples/             saved threat models
+examples/             saved threat models, a scoring profile, and generated reports
 ```
 
 ### Adding or changing rules
 
-Rules live in one array in `js/stride.js`:
+Security rules live in one array in `js/stride.js`:
 
 ```js
 {
@@ -262,6 +373,41 @@ themselves from that catalogue.
 
 A rule's `id` is also its handle in a scoring profile's `ruleScores`, so a rule can be
 re-rated without touching the code. Rule ids are included in the CSV export.
+
+Patient-safety rules live in a second array in the same file and carry the safety function
+they apply to, plus the clinical harm they produce:
+
+```js
+{
+  id: 'safe-stop-t', fn: 'safetyStop', cat: 'T', risk: 'high',
+  types: ['process', 'datastore', 'flow'],
+  test: function (el) { … },
+  title: 'Safety limits or interlock configuration at {name} can be modified',
+  hazard: 'The hard limits, dose caps, drug library … can be changed by an attacker …',
+  harm: 'The last barrier before harm is removed: a dose or energy that the interlock …',
+  mitigations: ['Hold safety limits in signed, integrity-checked configuration …']
+}
+```
+
+Adding a safety function to `TM.SAFETY_FUNCTIONS` in `js/model.js` extends the properties
+panel, the diagram badge, the report summary and the traceability matrix at once.
+
+## Standards this lines up with
+
+The safety layer follows what the medical device standards and guidance ask for, without
+claiming to be a compliance tool:
+
+- **ISO 14971** — security threats with a path to patient harm belong in the safety risk
+  management file as hazardous situations, with the same severity scale.
+- **IEC 62304** — each software item's safety class is recorded per element.
+- **IEC 81001-5-1 / MDCG 2019-16** — threat modelling in the security development life
+  cycle, with security risk management integrated with safety risk management.
+- **FDA premarket cybersecurity guidance (2023) / §524B** — exploitability *and* impact on
+  patient safety assessed together, with traceability from each threat to a control and its
+  verification evidence.
+
+The report gives you the threat model, the hazard references and the trace. Deciding
+acceptability, and doing the verification, stays with your risk management process.
 
 ### Teaching sessions to add
 

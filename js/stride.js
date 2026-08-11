@@ -589,6 +589,265 @@ window.TM = window.TM || {};
     }
   ];
 
+  /* =====================================================================
+   * PATIENT SAFETY RULES
+   *
+   * In a medical device, a security threat matters because of what it does
+   * to the patient. These rules fire on the safety-relevant functions an
+   * element declares, and each one states the hazardous situation and the
+   * harm so it can be reconciled with the safety risk management file
+   * (ISO 14971) rather than living only in the security world.
+   *
+   * The three classes the tool highlights:
+   *   control    - control or function of the device in a way that could
+   *                cause harm to the patient
+   *   alarm      - control or function that could cause incorrect alarms
+   *   safetyStop - degradation of implemented safety stops
+   * plus clinicalData and careDelivery as supporting cases.
+   * =================================================================== */
+  var SAFETY_RULES = [
+
+    /* ------------------- device control / actuation ------------------- */
+    {
+      id: 'safe-control-s', fn: 'control', cat: 'S', risk: 'high',
+      types: ['process', 'entity', 'flow'],
+      test: function (el) { return weakOrUnset(el, 'authentication', 'None / anonymous', 'Shared secret or API key'); },
+      title: 'Therapy commands to {name} are not proven to come from a legitimate source',
+      hazard: 'An attacker who can reach {name} issues therapy or actuation commands that the device accepts as clinical instructions, because nothing distinguishes them from the real controller or clinician.',
+      harm: 'Unintended therapy is delivered to the patient — wrong dose, wrong rate, wrong energy, or delivery to the wrong patient.',
+      mitigations: [
+        'Authenticate every command source cryptographically (mutual TLS, signed commands); network position is not identity.',
+        'Bind commands to a session, a patient context and a monotonic sequence number so replayed or injected commands are rejected.',
+        'Require confirmation at the device for changes that increase delivered therapy.'
+      ]
+    },
+    {
+      id: 'safe-control-t', fn: 'control', cat: 'T', risk: 'high',
+      types: ['process', 'datastore', 'flow'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'flowIntegrity', 'None', 'Transport (TLS) only');
+        if (el.type === 'datastore') return weakOrUnset(el, 'integrity', 'None', 'Constraints / checksums');
+        return weakOrUnset(el, 'inputValidation', 'None', 'Partial / deny-list');
+      },
+      title: 'Therapy parameters handled by {name} can be altered without detection',
+      hazard: 'Dose, rate, duration, energy or programme values passing through {name} can be modified — in transit, at rest, or by malformed input the code accepts — and neither the device nor the clinician can tell the value is not the one that was prescribed.',
+      harm: 'The patient receives an over-dose, under-dose or wrong therapy while the display and records show the intended value.',
+      mitigations: [
+        'Sign or MAC therapy parameters end to end, and verify at the point of actuation rather than at the gateway.',
+        'Range-check every parameter against clinically safe limits at the device, independently of whatever sent it.',
+        'Cross-check the value actually being delivered against the value that was prescribed, and alarm on divergence.'
+      ]
+    },
+    {
+      id: 'safe-control-e', fn: 'control', cat: 'E', risk: 'high',
+      types: ['process'],
+      test: function (el) { return weakOrUnset(el, 'authorization', 'None', 'Shared credential for everyone', 'Simple ownership check'); },
+      title: 'Therapy control functions in {name} are reachable without a clinical authorisation decision',
+      hazard: 'A caller who is authenticated for some other purpose — a service account, a read-only integration, a patient-facing feature — can invoke the functions that change therapy, because authorisation does not separate clinical control from everything else.',
+      harm: 'Someone with no clinical authority, or malware acting as them, changes the therapy a patient is receiving.',
+      mitigations: [
+        'Separate therapy-control operations behind their own authorisation, deny by default, and require a clinical role.',
+        'Require step-up authentication or a second person for high-consequence changes.',
+        'Log every therapy-control call with the authenticated identity and the resulting parameter change.'
+      ]
+    },
+    {
+      id: 'safe-control-d', fn: 'control', cat: 'D', risk: 'high',
+      types: ['process', 'flow', 'datastore'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'throttling', 'None', 'Timeouts only');
+        if (el.type === 'datastore') return weakOrUnset(el, 'backup', 'None', 'Backups, never tested');
+        return weakOrUnset(el, 'resilience', 'None', 'Timeouts only');
+      },
+      title: 'Loss of {name} removes control of therapy',
+      hazard: 'Flooding, resource exhaustion or an unavailable dependency stops {name} responding. Therapy cannot be started, adjusted or — the case people forget — stopped, and the clinician may not be told that control has been lost.',
+      harm: 'Therapy is interrupted, continues when it should have been stopped, or cannot be titrated while the patient deteriorates.',
+      mitigations: [
+        'Define and implement the safe state the device falls back to when its controller is unreachable, and test it.',
+        'Keep therapy control functional and locally overridable when the network, server or cloud is unavailable.',
+        'Rate limit and prioritise control traffic ahead of telemetry, logging and updates.',
+        'Alarm on loss of control communication rather than failing silently.'
+      ]
+    },
+    {
+      id: 'safe-control-r', fn: 'control', cat: 'R', risk: 'medium',
+      types: ['process', 'datastore'],
+      test: function (el) { return weakOrUnset(el, 'logging', 'None', 'Errors only', 'Security events logged'); },
+      title: 'Therapy changes at {name} cannot be reconstructed afterwards',
+      hazard: 'There is no tamper-evident record tying each therapy change to an identity, a time and a patient. After an adverse event nobody can establish what the device was told to do, by whom, or whether the instruction was legitimate.',
+      harm: 'A harmful setting cannot be traced, so the same hazard recurs; incident investigation, vigilance reporting and clinical defence all fail.',
+      mitigations: [
+        'Keep an append-only therapy audit trail: identity, timestamp, previous and new value, patient context and outcome.',
+        'Retain it for the period your vigilance and post-market surveillance obligations require.',
+        'Make sure the device keeps this record locally even when disconnected.'
+      ]
+    },
+
+    /* ----------------------------- alarms ----------------------------- */
+    {
+      id: 'safe-alarm-t', fn: 'alarm', cat: 'T', risk: 'high',
+      types: ['process', 'datastore', 'flow'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'flowIntegrity', 'None', 'Transport (TLS) only');
+        if (el.type === 'datastore') return weakOrUnset(el, 'integrity', 'None', 'Constraints / checksums');
+        return weakOrUnset(el, 'inputValidation', 'None', 'Partial / deny-list');
+      },
+      title: 'Alarm conditions or thresholds at {name} can be tampered with',
+      hazard: 'Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through {name}. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.',
+      harm: 'A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.',
+      mitigations: [
+        'Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.',
+        'Sign alarm messages so a receiver can prove the alarm came from the device that raised it.',
+        'Restrict who can change alarm limits, and record every change with the identity that made it.',
+        'Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.'
+      ]
+    },
+    {
+      id: 'safe-alarm-d', fn: 'alarm', cat: 'D', risk: 'high',
+      types: ['process', 'flow', 'datastore'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'throttling', 'None', 'Timeouts only');
+        if (el.type === 'datastore') return true;
+        return weakOrUnset(el, 'resilience', 'None', 'Timeouts only');
+      },
+      title: 'Alarm delivery through {name} can be blocked, delayed or flooded',
+      hazard: 'An attacker floods, exhausts or simply cuts {name}, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.',
+      harm: 'Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.',
+      mitigations: [
+        'Set and verify a maximum alarm annunciation delay end to end; monitor it in service.',
+        'Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.',
+        'Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.',
+        'Keep an independent local annunciation that does not depend on the network at all.'
+      ]
+    },
+    {
+      id: 'safe-alarm-s', fn: 'alarm', cat: 'S', risk: 'high',
+      types: ['process', 'flow', 'entity'],
+      test: function (el) { return weakOrUnset(el, 'authentication', 'None / anonymous', 'Shared secret or API key'); },
+      title: 'Alarms carried by {name} cannot be shown to be genuine',
+      hazard: 'Anything that can reach {name} can announce an alarm, or announce that an alarm has cleared, while claiming to be a device. Receivers have no way to tell a real alarm from a forged one.',
+      harm: 'False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one.',
+      mitigations: [
+        'Authenticate the alarm source; prefer per-device identity (certificates) over a shared credential.',
+        'Include device identity, patient context and a timestamp inside the signed alarm payload.',
+        'Reconcile remote alarm state against the device periodically instead of trusting the last message received.'
+      ]
+    },
+    {
+      id: 'safe-alarm-r', fn: 'alarm', cat: 'R', risk: 'medium',
+      types: ['process', 'datastore'],
+      test: function (el) { return weakOrUnset(el, 'logging', 'None', 'Errors only', 'Security events logged'); },
+      title: 'Alarm history at {name} is not reliable evidence',
+      hazard: 'Whether an alarm fired, when it was annunciated, who acknowledged it and when it cleared is not recorded tamper-evidently at {name}.',
+      harm: 'After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected.',
+      mitigations: [
+        'Log every alarm raise, annunciate, acknowledge, silence and clear event with identity and timestamp.',
+        'Store alarm history where the clinical or service user cannot edit it, and synchronise clocks.',
+        'Review silenced and repeatedly-acknowledged alarms as a safety signal.'
+      ]
+    },
+
+    /* ------------------------- safety stops --------------------------- */
+    {
+      id: 'safe-stop-t', fn: 'safetyStop', cat: 'T', risk: 'high',
+      types: ['process', 'datastore', 'flow'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'flowIntegrity', 'None', 'Transport (TLS) only');
+        if (el.type === 'datastore') return weakOrUnset(el, 'integrity', 'None', 'Constraints / checksums');
+        return weakOrUnset(el, 'inputValidation', 'None', 'Partial / deny-list');
+      },
+      title: 'Safety limits or interlock configuration at {name} can be modified',
+      hazard: 'The hard limits, dose caps, drug library, interlock rules or fail-safe configuration held or carried by {name} can be changed by an attacker. The protective function still appears present but no longer constrains anything meaningful.',
+      harm: 'The last barrier before harm is removed: a dose or energy that the interlock existed to prevent is delivered, and nothing intervenes.',
+      mitigations: [
+        'Hold safety limits in signed, integrity-checked configuration verified at load and periodically at run time.',
+        'Enforce an absolute hard limit in firmware or hardware that no configuration or network message can widen.',
+        'Treat a change to a safety limit as a controlled change: authenticated, authorised, logged, and visible to the clinician.',
+        'Alarm when the running limits differ from the approved set.'
+      ]
+    },
+    {
+      id: 'safe-stop-e', fn: 'safetyStop', cat: 'E', risk: 'high',
+      types: ['process'],
+      test: function (el) { return weakOrUnset(el, 'authorization', 'None', 'Shared credential for everyone', 'Simple ownership check'); },
+      title: 'The safety stop in {name} can be overridden without proper authority',
+      hazard: 'Override, service, maintenance or "clinical justification" paths that disable the interlock are reachable by a caller who should not have them — a normal user, a service tool, or anything that has learned the shared override credential.',
+      harm: 'The protective stop is bypassed and the patient is exposed to exactly the hazard it was implemented to control.',
+      mitigations: [
+        'Require a distinct, strongly authenticated role for any override, with per-use authorisation rather than a mode that stays on.',
+        'Make overrides time-boxed and self-expiring, and annunciate continuously while one is active.',
+        'Log every override with identity, reason and duration, and review them as a safety signal.',
+        'Remove service backdoors and default maintenance credentials from production devices.'
+      ]
+    },
+    {
+      id: 'safe-stop-d', fn: 'safetyStop', cat: 'D', risk: 'high',
+      types: ['process', 'flow'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'throttling', 'None', 'Timeouts only');
+        return weakOrUnset(el, 'resilience', 'None', 'Timeouts only', 'Rate limiting / quotas');
+      },
+      title: 'The safety stop in {name} may not run when it is needed',
+      hazard: 'Resource exhaustion, flooding or a hung dependency starves the watchdog, monitor or interlock logic in {name}. The protective function is not removed — it simply does not get to execute in time, or cannot reach the actuator to stop it.',
+      harm: 'The device continues in an unsafe state because the mechanism that should have stopped it never ran.',
+      mitigations: [
+        'Run the safety monitor independently of the application: separate task, separate watchdog, ideally separate processor.',
+        'Give it a guaranteed execution budget that untrusted work cannot consume, and a hardware watchdog behind it.',
+        'Design the failure direction deliberately: on loss of the monitor, the device goes to the safe state rather than continuing.',
+        'Test the interlock under load and under attack conditions, not only on an idle bench.'
+      ]
+    },
+
+    /* ------------------- clinical data and care delivery -------------- */
+    {
+      id: 'safe-data-t', fn: 'clinicalData', cat: 'T', risk: 'high',
+      types: ['process', 'datastore', 'flow'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'flowIntegrity', 'None', 'Transport (TLS) only');
+        if (el.type === 'datastore') return weakOrUnset(el, 'integrity', 'None', 'Constraints / checksums');
+        return weakOrUnset(el, 'inputValidation', 'None', 'Partial / deny-list');
+      },
+      title: 'Clinical data at {name} can be altered or substituted',
+      hazard: 'Measurements, images, results or the patient identity attached to them can be modified through {name}, or the data of one patient can be presented as another\'s, without the clinician being able to detect it.',
+      harm: 'A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.',
+      mitigations: [
+        'Bind clinical data to patient identity cryptographically and verify it at the point of display.',
+        'Sign results at the source; verify signatures before a result is used clinically.',
+        'Detect and flag stale data rather than displaying a last-known value as current.'
+      ]
+    },
+    {
+      id: 'safe-data-d', fn: 'clinicalData', cat: 'D', risk: 'high',
+      types: ['process', 'datastore', 'flow'],
+      test: function (el) {
+        if (el.type === 'flow') return weakOrUnset(el, 'throttling', 'None', 'Timeouts only');
+        if (el.type === 'datastore') return weakOrUnset(el, 'backup', 'None', 'Backups, never tested');
+        return weakOrUnset(el, 'resilience', 'None', 'Timeouts only');
+      },
+      title: 'Clinical data from {name} may be unavailable when a decision has to be made',
+      hazard: 'An attack, an outage or a ransomware event makes {name} unavailable at the moment a clinician needs the data it holds or carries.',
+      harm: 'Treatment is delayed, or a decision is made without information that was available yesterday.',
+      mitigations: [
+        'Define the downtime procedure and make sure clinicians have practised it.',
+        'Keep an independent, offline-capable copy of data needed for urgent care.',
+        'Cache the most recent values locally with an explicit staleness indicator.'
+      ]
+    },
+    {
+      id: 'safe-care-d', fn: 'careDelivery', cat: 'D', risk: 'medium',
+      types: ['process', 'datastore', 'flow', 'entity'],
+      test: function () { return true; },
+      title: 'Loss of {name} delays or prevents care',
+      hazard: '{name} is on the path for delivering care. A denial-of-service, ransomware event or dependency outage removes it, and the clinical workflow it supports stops.',
+      harm: 'Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm.',
+      mitigations: [
+        'Agree the maximum tolerable downtime with the clinical service and design to it.',
+        'Provide a documented, rehearsed manual fallback that does not depend on the compromised system.',
+        'Segment the device network so an outage elsewhere in the hospital cannot take clinical care down with it.'
+      ]
+    }
+  ];
+
   /* ---------------------------------------------------------------------
    * Cross-element rules: a missing control on a flow is usually a threat
    * against the element on the receiving end, so those findings are attached
@@ -686,6 +945,7 @@ window.TM = window.TM || {};
   function contextFactors(el, ctx, cat) {
     return {
       aggravators: {
+        patientSafety: false,   /* set by the caller for safety rules */
         sensitiveData: ctx.impact >= 2,
         externalExposure: ctx.exposureScore >= 2,
         markedAsset: !!ctx.isAsset,
@@ -730,6 +990,17 @@ window.TM = window.TM || {};
     if (rule.risk !== 'info' || profile.ruleScores[rule.id] !== undefined) {
       score += (profile.categoryPoints && profile.categoryPoints[cat]) || 0;
       var factors = contextFactors(el, ctx, cat);
+      /* A threat that can reach the patient is weighted by the severity of
+         the harm it could cause, not only by the data it touches. */
+      if (rule.fn) {
+        factors.aggravators.patientSafety = true;
+        var harm = val(el, 'harmSeverity');
+        var harmPoints = (profile.harmSeverityPoints && profile.harmSeverityPoints[harm]) || 0;
+        if (harmPoints) {
+          score += harmPoints;
+          applied.harmSeverity = { level: harm, points: harmPoints };
+        }
+      }
       TM.SCORING_AGGRAVATORS.forEach(function (k) {
         if (!factors.aggravators[k]) return;
         score += profile.aggravatorPoints[k] || 0;
@@ -818,6 +1089,50 @@ window.TM = window.TM || {};
         });
       });
 
+      /* Patient safety rules, one pass per safety function declared. */
+      var safetyFns = TM.safetyFunctionsOf(el);
+      safetyFns.forEach(function (fnKey) {
+        var fnDef = TM.safetyFunction(fnKey);
+        SAFETY_RULES.forEach(function (rule) {
+          if (rule.fn !== fnKey) return;
+          if (rule.types.indexOf(el.type) === -1) return;
+          if (applicable.indexOf(rule.cat) === -1) return;
+          var hit;
+          try { hit = rule.test(el, ctx); } catch (e) { hit = false; }
+          if (!hit) return;
+          seq += 1;
+          var assessment = assessmentFor(el.id, rule.id);
+          findings.push({
+            ref: 'T-' + pad(seq),
+            ruleId: rule.id,
+            elementId: el.id,
+            elementType: el.type,
+            elementLabel: TM.label(el),
+            category: rule.cat,
+            title: fill(rule.title, el, ctx),
+            threat: fill(rule.hazard, el, ctx),
+            mitigations: rule.mitigations.slice(),
+            baseRisk: rule.risk,
+            severity: severityFor(profile, rule, el, ctx, rule.cat, assessment),
+            cvss: assessment,
+            existingControls: (el.existingControls || '').trim(),
+            crossings: ctx.crossingNames.slice(),
+            /* --- patient safety --- */
+            safety: {
+              fn: fnKey,
+              fnLabel: fnDef.label,
+              fnShort: fnDef.short,
+              hazard: fill(rule.hazard, el, ctx),
+              harm: rule.harm,
+              severityOfHarm: val(el, 'harmSeverity'),
+              softwareSafetyClass: val(el, 'softwareSafetyClass'),
+              fileRef: (el.props && el.props.safetyFileRef) || '',
+              notes: (el.props && el.props.safetyNotes) || ''
+            }
+          });
+        });
+      });
+
       /* Coverage gaps: categories the modeller has not answered. */
       var unanswered = TM.fieldsFor(el.type).filter(function (f) {
         return f.type !== 'text' && TM.isUnset(val(el, f.key));
@@ -899,15 +1214,88 @@ window.TM = window.TM || {};
       return row;
     });
 
+    /* -------------------------------------------------------------------
+     * Patient safety traceability.
+     *
+     * Hazard references are assigned in diagram order (not risk order) so an
+     * id stays stable while the model is unchanged and can be quoted in the
+     * safety risk management file.
+     * ----------------------------------------------------------------- */
+    var hazardSeq = 0;
+    var safetyByElement = {};
+    elements.forEach(function (el) {
+      findings.filter(function (f) { return f.elementId === el.id && f.safety; })
+        .forEach(function (f) {
+          hazardSeq += 1;
+          f.safety.hazardRef = 'SEC-HAZ-' + pad3(hazardSeq);
+          if (!safetyByElement[el.id]) safetyByElement[el.id] = [];
+          safetyByElement[el.id].push(f);
+        });
+    });
+
+    /* Every safety-relevant element appears in the trace, including those
+       where no threat was raised - a clean element still needs a recorded
+       justification in the safety file. */
+    var safetyTrace = elements.filter(function (el) { return TM.hasSafetyRole(el); })
+      .map(function (el) {
+        return {
+          elementId: el.id,
+          label: TM.label(el),
+          type: el.type,
+          functions: TM.safetyFunctionsOf(el),
+          severityOfHarm: val(el, 'harmSeverity'),
+          softwareSafetyClass: val(el, 'softwareSafetyClass'),
+          fileRef: (el.props && el.props.safetyFileRef) || '',
+          notes: (el.props && el.props.safetyNotes) || '',
+          existingControls: (el.existingControls || '').trim(),
+          findings: safetyByElement[el.id] || []
+        };
+      });
+
+    /* Elements that can act on the patient but have no severity of harm, or
+       no reference into the safety file, break the trace. */
+    var safetyGaps = [];
+    elements.forEach(function (el) {
+      var fns = TM.safetyFunctionsOf(el);
+      if (TM.isUnset(val(el, 'safetyFunctions'))) {
+        safetyGaps.push({
+          elementId: el.id, label: TM.label(el), type: el.type,
+          issue: 'Patient safety impact has not been assessed for this element.'
+        });
+        return;
+      }
+      if (!fns.length) return;
+      if (TM.isUnset(val(el, 'harmSeverity'))) {
+        safetyGaps.push({
+          elementId: el.id, label: TM.label(el), type: el.type,
+          issue: 'Has safety-relevant functions but no severity of harm, so its threats cannot be weighted or reconciled with the safety file.'
+        });
+      }
+      if (!(el.props && (el.props.safetyFileRef || '').trim())) {
+        safetyGaps.push({
+          elementId: el.id, label: TM.label(el), type: el.type,
+          issue: 'Has safety-relevant functions but no safety file reference — the security finding cannot be traced to a hazard.'
+        });
+      }
+    });
+
     /* Severity levels present, highest first - the profile's own levels plus
        any CVSS band that only appears on a scored threat. */
     var levelIndex = {};
     profile.levels.forEach(function (lv) {
       levelIndex[lv.label] = { label: lv.label, color: lv.color, sort: lv.min, count: 0 };
     });
-    var stats = { total: findings.length, byCategory: {}, byLevel: {}, scored: 0 };
+    var stats = {
+      total: findings.length, byCategory: {}, byLevel: {}, scored: 0,
+      safety: 0, bySafetyFunction: {}, safetyElements: safetyTrace.length
+    };
+    TM.SAFETY_FUNCTIONS.forEach(function (f) { stats.bySafetyFunction[f.key] = 0; });
     TM.STRIDE_ORDER.forEach(function (c) { stats.byCategory[c] = 0; });
     findings.forEach(function (f) {
+      if (f.safety) {
+        stats.safety += 1;
+        stats.bySafetyFunction[f.safety.fn] += 1;
+      }
       var label = f.severity.label;
       if (!levelIndex[label]) {
         levelIndex[label] = { label: label, color: f.severity.color, sort: f.severity.sort, count: 0 };
@@ -932,14 +1320,17 @@ window.TM = window.TM || {};
 
     return {
       findings: findings, gaps: gaps, notes: notes, coverage: coverage,
-      stats: stats, profile: profile
+      stats: stats, profile: profile,
+      safetyTrace: safetyTrace, safetyGaps: safetyGaps
     };
   };
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function pad3(n) { return (n < 10 ? '00' : n < 100 ? '0' : '') + n; }
 
   /** Every rule id, so a scoring profile's overrides can be checked for typos. */
   TM.RULE_IDS = RULES.map(function (r) { return r.id; })
+    .concat(SAFETY_RULES.map(function (r) { return r.id; }))
     .concat(FLOW_RULES.map(function (r) { return r.id; }));
 
   /** Rule metadata for the scoring editor: id, element types, category, base. */
