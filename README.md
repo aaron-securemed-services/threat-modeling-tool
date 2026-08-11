@@ -54,6 +54,17 @@ click the destination. A flow whose endpoints sit in different trust boundaries 
 **dashed** and is analysed more strictly — boundary crossings are computed from the
 geometry, so moving a box changes the analysis.
 
+Every flow gets **its own connection point** on the border of each element it touches.
+Flows are assigned to the side of the shape facing the other end and then spread evenly
+along it, ordered so lines don't cross needlessly — several flows into the same element
+stay legible instead of piling up on one spot.
+
+**Right-click** an element for its menu: edit properties, draw a data flow from here,
+mark as an asset, duplicate, reverse or make a flow bidirectional, and delete. Right-click
+empty canvas to add an element at that point or fit the view. Deleting is also available
+from the **Delete selected** button under the palette, from the properties panel, and with
+the `Del` key.
+
 Keyboard: `V` select · `E` entity · `P` process · `D` data store · `F` flow ·
 `B` boundary · `A` asset · `Del` delete · `Esc` cancel · `Ctrl+Z` / `Ctrl+Y` undo/redo ·
 `Ctrl+S` save · arrows nudge, `Shift`+arrows nudge by grid.
@@ -102,12 +113,59 @@ Press **STRIDE report**. The report contains:
 Download it as **Markdown**, **HTML**, or **CSV** (one row per threat, drops straight into
 a risk register), or print to PDF.
 
-### 4. Export the picture
+### 4. Score the threats
+
+Two scoring routes, and they can be mixed.
+
+**Your own severity scale.** Press **Scoring…** to see how severity is computed and to
+import a profile of your own — your severity names, colours, thresholds, per-category
+weights and per-rule overrides. Download the annotated template from the same dialog for a
+starting point. The profile is stored inside the threat model file, so a class or a team
+all score the same way, and the report's Appendix B prints the arithmetic in full.
+
+```jsonc
+{
+  "name": "ACME three-tier scale",
+  "levels": [                                   // mapped from the computed score
+    { "label": "Note",     "color": "#7d8ba6", "min": 0   },
+    { "label": "Issue",    "color": "#cbb01f", "min": 3   },
+    { "label": "Escalate", "color": "#c62828", "min": 4.5 }
+  ],
+  "baseScores":       { "info": 1, "low": 2, "medium": 3, "high": 4, "critical": 6 },
+  "categoryPoints":   { "I": 0.5, "E": 0.5 },   // weight STRIDE categories differently
+  "aggravatorPoints": { "sensitiveData": 0.5, "externalExposure": 0.5,
+                        "markedAsset": 0.5, "safetyCriticalDoS": 0.5 },
+  "mitigatorPoints":  { "publicData": 0.5, "lowAvailabilityNeed": 0.5 },
+  "ruleScores":       { "ds-i-rest": 6 },       // override individual rules by id
+  "cvss":             { "useWhenPresent": true }
+}
+```
+
+Score = base rating of the rule + category points + aggravating context − mitigating
+context, mapped onto the highest level whose `min` it reaches. Invalid profiles are
+rejected with a specific reason rather than silently half-applied, and a bad profile inside
+a model file never stops the file from opening.
+
+**CVSS v4.0.** Any individual threat in the report can carry a CVSS v4.0 assessment. Build
+the vector in the [NVD CVSS v4.0 calculator](https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator),
+then paste the vector and the score it produced into the finding, with an optional note on
+how it was rated. The vector is validated metric by metric against the v4.0 specification
+(all eleven mandatory base metrics, plus threat, environmental and supplemental metrics);
+the numeric score is taken as entered. Its band — None, Low, Medium, High, Critical —
+replaces the modelled severity, which you can turn off under **Scoring…** if you would
+rather keep both views. Vectors, scores and notes are saved with the model and appear in
+the Markdown, HTML and CSV exports.
+
+This tool deliberately does not reimplement the CVSS 4.0 scoring tables: the score comes
+from the official calculator, so there is no second, subtly-different implementation to
+disagree with it.
+
+### 5. Export the picture
 
 **Export PNG** (2× resolution) or **Export SVG** writes the diagram, its title and the
 legend to an image. The grid and selection handles are never included.
 
-### 5. Save
+### 6. Save
 
 The diagram is autosaved to browser storage. **Save .json** writes a portable file to hand
 to students or commit to a repository; **Open…** loads it back. `examples/patient-portal.json`
@@ -141,11 +199,12 @@ findings are attached to the receiving element and cite the flow they came in on
 Each rule carries a base rating, adjusted by diagram context. Aggravating factors are:
 confidential or regulated data; an internet-facing or anonymous-facing element, or a flow
 crossing an external boundary; the element being marked as an asset; and, for
-denial-of-service, a safety-critical availability need. Two or more aggravating factors
-raise the rating one step; public data or a low availability need lowers it one.
-**Critical** is reserved for threats critical in themselves or carrying three aggravating
-factors. The ratings are a starting point for discussion, not a substitute for a risk
-acceptance process — which is itself worth saying out loud in class.
+denial-of-service, a safety-critical availability need. Under the built-in scale two of
+those raise the rating one step, and **Critical** is reserved for threats critical in
+themselves or carrying three; public data or a low availability need lowers it one. All of
+those numbers are editable — see *Score the threats* above. The ratings are a starting
+point for discussion, not a substitute for a risk acceptance process — which is itself
+worth saying out loud in class.
 
 ---
 
@@ -200,6 +259,17 @@ Rules live in one array in `js/stride.js`:
 crosses. Adding a new category to ask about is a matter of appending to `TM.FIELDS` in
 `js/model.js` — the properties panel, the report and the coverage gap list all build
 themselves from that catalogue.
+
+A rule's `id` is also its handle in a scoring profile's `ruleScores`, so a rule can be
+re-rated without touching the code. Rule ids are included in the CSV export.
+
+### Teaching sessions to add
+
+The scoring profile and CVSS features open up two more exercises worth 20 minutes each:
+have the group write a profile that reflects how their organisation actually escalates
+things, or take the three worst findings and score them properly in the NVD calculator,
+then compare the CVSS band against the modelled rating and work out which one is telling
+the truth.
 
 ## Browser support
 

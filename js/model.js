@@ -311,7 +311,11 @@ window.TM = window.TM || {};
         scope: ''
       },
       nodes: [],
-      flows: []
+      flows: [],
+      /* null = use the built-in qualitative scale */
+      scoring: null,
+      /* per-threat CVSS assessments, keyed "<elementId>::<ruleId>" */
+      assessments: {}
     };
   };
 
@@ -415,6 +419,308 @@ window.TM = window.TM || {};
   };
 
   /* ---------------------------------------------------------------------
+   * Severity scoring profiles
+   *
+   * Every rule carries a base rating; the engine turns that into a number,
+   * adds points for aggravating diagram context, subtracts points for
+   * mitigating context, and maps the result onto a named level. All of those
+   * numbers live in a profile, so an organisation can import its own scale
+   * instead of arguing with the built-in one.
+   * ------------------------------------------------------------------- */
+  TM.DEFAULT_SCORING = {
+    name: 'Built-in qualitative scale',
+    description: 'Rule base rating adjusted by the diagram context.',
+    levels: [
+      { label: 'Info', color: '#7d8ba6', min: 0 },
+      { label: 'Low', color: '#3f9c63', min: 2 },
+      { label: 'Medium', color: '#cbb01f', min: 3 },
+      { label: 'High', color: '#e07b1a', min: 4 },
+      { label: 'Critical', color: '#c62828', min: 5.5 }
+    ],
+    baseScores: { info: 1, low: 2, medium: 3, high: 4, critical: 6 },
+    ruleScores: {},
+    categoryPoints: { S: 0, T: 0, R: 0, I: 0, D: 0, E: 0 },
+    aggravatorPoints: {
+      sensitiveData: 0.5,        /* confidential or regulated data */
+      externalExposure: 0.5,     /* internet / anonymous facing, or an external boundary crossing */
+      markedAsset: 0.5,          /* the element is flagged as an asset */
+      safetyCriticalDoS: 0.5     /* availability threat against a safety-critical element */
+    },
+    mitigatorPoints: {
+      publicData: 0.5,
+      lowAvailabilityNeed: 0.5
+    },
+    cvss: { useWhenPresent: true }
+  };
+
+  var AGGRAVATORS = ['sensitiveData', 'externalExposure', 'markedAsset', 'safetyCriticalDoS'];
+  var MITIGATORS = ['publicData', 'lowAvailabilityNeed'];
+
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+
+  /**
+   * Validate and fill in a user-supplied scoring profile.
+   * @returns {{profile: Object|null, errors: string[]}}
+   */
+  TM.validateScoring = function (raw) {
+    var errors = [];
+    var warnings = [];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { profile: null, errors: ['The profile must be a JSON object.'], warnings: warnings };
+    }
+    var d = TM.DEFAULT_SCORING;
+    var p = {
+      name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : 'Custom scale',
+      description: typeof raw.description === 'string' ? raw.description : '',
+      levels: [],
+      baseScores: {},
+      ruleScores: {},
+      categoryPoints: {},
+      aggravatorPoints: {},
+      mitigatorPoints: {},
+      cvss: { useWhenPresent: true }
+    };
+
+    /* levels */
+    if (!Array.isArray(raw.levels) || raw.levels.length < 2) {
+      errors.push('"levels" must be an array of at least two levels, each { label, color, min }.');
+    } else {
+      raw.levels.forEach(function (lv, i) {
+        if (!lv || typeof lv !== 'object') { errors.push('Level ' + (i + 1) + ' is not an object.'); return; }
+        if (typeof lv.label !== 'string' || !lv.label.trim()) { errors.push('Level ' + (i + 1) + ' needs a "label".'); return; }
+        if (!isNum(lv.min)) { errors.push('Level "' + lv.label + '" needs a numeric "min".'); return; }
+        var color = typeof lv.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(lv.color.trim())
+          ? lv.color.trim() : '#7d8ba6';
+        if (typeof lv.color === 'string' && color !== lv.color.trim()) {
+          errors.push('Level "' + lv.label + '" has an invalid colour; expected a hex value like #c62828.');
+        }
+        p.levels.push({ label: lv.label.trim(), color: color, min: lv.min });
+      });
+      p.levels.sort(function (a, b) { return a.min - b.min; });
+      for (var i = 1; i < p.levels.length; i++) {
+        if (p.levels[i].min === p.levels[i - 1].min) {
+          errors.push('Levels "' + p.levels[i - 1].label + '" and "' + p.levels[i].label + '" share the same "min" value.');
+        }
+      }
+    }
+
+    /* base scores */
+    ['info', 'low', 'medium', 'high', 'critical'].forEach(function (k) {
+      var v = raw.baseScores && raw.baseScores[k];
+      if (v === undefined) { p.baseScores[k] = d.baseScores[k]; return; }
+      if (!isNum(v)) { errors.push('baseScores.' + k + ' must be a number.'); p.baseScores[k] = d.baseScores[k]; return; }
+      p.baseScores[k] = v;
+    });
+
+    /* per-rule overrides */
+    if (raw.ruleScores !== undefined) {
+      if (!raw.ruleScores || typeof raw.ruleScores !== 'object') {
+        errors.push('"ruleScores" must be an object of ruleId -> number.');
+      } else {
+        Object.keys(raw.ruleScores).forEach(function (k) {
+          if (!isNum(raw.ruleScores[k])) { errors.push('ruleScores.' + k + ' must be a number.'); return; }
+          p.ruleScores[k] = raw.ruleScores[k];
+        });
+      }
+    }
+
+    /* per-category points */
+    TM.STRIDE_ORDER.forEach(function (c) {
+      var v = raw.categoryPoints && raw.categoryPoints[c];
+      if (v === undefined) { p.categoryPoints[c] = 0; return; }
+      if (!isNum(v)) { errors.push('categoryPoints.' + c + ' must be a number.'); p.categoryPoints[c] = 0; return; }
+      p.categoryPoints[c] = v;
+    });
+
+    /* context points */
+    AGGRAVATORS.forEach(function (k) {
+      var v = raw.aggravatorPoints && raw.aggravatorPoints[k];
+      if (v === undefined) { p.aggravatorPoints[k] = d.aggravatorPoints[k]; return; }
+      if (!isNum(v)) { errors.push('aggravatorPoints.' + k + ' must be a number.'); p.aggravatorPoints[k] = d.aggravatorPoints[k]; return; }
+      p.aggravatorPoints[k] = v;
+    });
+    MITIGATORS.forEach(function (k) {
+      var v = raw.mitigatorPoints && raw.mitigatorPoints[k];
+      if (v === undefined) { p.mitigatorPoints[k] = d.mitigatorPoints[k]; return; }
+      if (!isNum(v)) { errors.push('mitigatorPoints.' + k + ' must be a number.'); p.mitigatorPoints[k] = d.mitigatorPoints[k]; return; }
+      p.mitigatorPoints[k] = v;
+    });
+
+    if (raw.cvss && typeof raw.cvss === 'object' && raw.cvss.useWhenPresent !== undefined) {
+      p.cvss.useWhenPresent = !!raw.cvss.useWhenPresent;
+    }
+
+    /* An unknown rule id is a typo worth surfacing, but not a reason to
+       reject an otherwise valid profile. */
+    Object.keys(p.ruleScores).forEach(function (id) {
+      if (TM.RULE_IDS && TM.RULE_IDS.indexOf(id) === -1) {
+        warnings.push('ruleScores."' + id + '" does not match any rule id, so it will have no effect.');
+      }
+    });
+
+    return { profile: errors.length ? null : p, errors: errors, warnings: warnings };
+  };
+
+  /** The profile in force for a model. */
+  TM.scoringOf = function (model) {
+    return (model && model.scoring) || TM.DEFAULT_SCORING;
+  };
+
+  /** Map a numeric score onto the highest level whose threshold it reaches. */
+  TM.levelForScore = function (profile, score) {
+    var levels = profile.levels;
+    var chosen = levels[0];
+    for (var i = 0; i < levels.length; i++) {
+      if (score >= levels[i].min) chosen = levels[i];
+    }
+    return chosen;
+  };
+
+  TM.SCORING_AGGRAVATORS = AGGRAVATORS;
+  TM.SCORING_MITIGATORS = MITIGATORS;
+
+  /* ---------------------------------------------------------------------
+   * CVSS v4.0
+   *
+   * The vector is validated in full; the score itself is entered by the user
+   * from the official calculator at
+   * https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator - this tool does not
+   * reimplement the CVSS scoring tables.
+   * ------------------------------------------------------------------- */
+  var CVSS4_METRICS = {
+    /* Base - all mandatory */
+    AV: { name: 'Attack Vector', values: ['N', 'A', 'L', 'P'], required: true },
+    AC: { name: 'Attack Complexity', values: ['L', 'H'], required: true },
+    AT: { name: 'Attack Requirements', values: ['N', 'P'], required: true },
+    PR: { name: 'Privileges Required', values: ['N', 'L', 'H'], required: true },
+    UI: { name: 'User Interaction', values: ['N', 'P', 'A'], required: true },
+    VC: { name: 'Vulnerable System Confidentiality', values: ['H', 'L', 'N'], required: true },
+    VI: { name: 'Vulnerable System Integrity', values: ['H', 'L', 'N'], required: true },
+    VA: { name: 'Vulnerable System Availability', values: ['H', 'L', 'N'], required: true },
+    SC: { name: 'Subsequent System Confidentiality', values: ['H', 'L', 'N'], required: true },
+    SI: { name: 'Subsequent System Integrity', values: ['H', 'L', 'N'], required: true },
+    SA: { name: 'Subsequent System Availability', values: ['H', 'L', 'N'], required: true },
+    /* Threat */
+    E: { name: 'Exploit Maturity', values: ['X', 'A', 'P', 'U'] },
+    /* Environmental */
+    CR: { name: 'Confidentiality Requirement', values: ['X', 'H', 'M', 'L'] },
+    IR: { name: 'Integrity Requirement', values: ['X', 'H', 'M', 'L'] },
+    AR: { name: 'Availability Requirement', values: ['X', 'H', 'M', 'L'] },
+    MAV: { name: 'Modified Attack Vector', values: ['X', 'N', 'A', 'L', 'P'] },
+    MAC: { name: 'Modified Attack Complexity', values: ['X', 'L', 'H'] },
+    MAT: { name: 'Modified Attack Requirements', values: ['X', 'N', 'P'] },
+    MPR: { name: 'Modified Privileges Required', values: ['X', 'N', 'L', 'H'] },
+    MUI: { name: 'Modified User Interaction', values: ['X', 'N', 'P', 'A'] },
+    MVC: { name: 'Modified Vulnerable System Confidentiality', values: ['X', 'H', 'L', 'N'] },
+    MVI: { name: 'Modified Vulnerable System Integrity', values: ['X', 'H', 'L', 'N'] },
+    MVA: { name: 'Modified Vulnerable System Availability', values: ['X', 'H', 'L', 'N'] },
+    MSC: { name: 'Modified Subsequent System Confidentiality', values: ['X', 'H', 'L', 'N'] },
+    MSI: { name: 'Modified Subsequent System Integrity', values: ['X', 'S', 'H', 'L', 'N'] },
+    MSA: { name: 'Modified Subsequent System Availability', values: ['X', 'S', 'H', 'L', 'N'] },
+    /* Supplemental */
+    S: { name: 'Safety', values: ['X', 'N', 'P'] },
+    AU: { name: 'Automatable', values: ['X', 'N', 'Y'] },
+    R: { name: 'Recovery', values: ['X', 'A', 'U', 'I'] },
+    V: { name: 'Value Density', values: ['X', 'D', 'C'] },
+    RE: { name: 'Vulnerability Response Effort', values: ['X', 'L', 'M', 'H'] },
+    U: { name: 'Provider Urgency', values: ['X', 'Clear', 'Green', 'Amber', 'Red'] }
+  };
+
+  TM.CVSS4 = {
+    CALCULATOR_URL: 'https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator',
+    METRICS: CVSS4_METRICS,
+
+    /**
+     * Validate a CVSS:4.0 vector string.
+     * @returns {{ok: boolean, metrics: Object, errors: string[], vector: string}}
+     */
+    parse: function (input) {
+      var errors = [];
+      var vector = String(input || '').trim().replace(/\s+/g, '');
+      var metrics = {};
+      if (!vector) return { ok: false, metrics: metrics, errors: ['Enter a CVSS v4.0 vector string.'], vector: vector };
+
+      var parts = vector.split('/');
+      if (parts[0] !== 'CVSS:4.0') {
+        return { ok: false, metrics: metrics, errors: ['A CVSS v4.0 vector must start with "CVSS:4.0/".'], vector: vector };
+      }
+      for (var i = 1; i < parts.length; i++) {
+        var seg = parts[i];
+        if (!seg) continue;
+        var idx = seg.indexOf(':');
+        if (idx === -1) { errors.push('"' + seg + '" is not a metric:value pair.'); continue; }
+        var key = seg.slice(0, idx);
+        var value = seg.slice(idx + 1);
+        var def = CVSS4_METRICS[key];
+        if (!def) { errors.push('Unknown metric "' + key + '".'); continue; }
+        if (metrics[key] !== undefined) { errors.push('Metric "' + key + '" appears more than once.'); continue; }
+        if (def.values.indexOf(value) === -1) {
+          errors.push('"' + value + '" is not valid for ' + key + ' (' + def.name + '). Expected one of: ' + def.values.join(', ') + '.');
+          continue;
+        }
+        metrics[key] = value;
+      }
+      Object.keys(CVSS4_METRICS).forEach(function (key) {
+        if (CVSS4_METRICS[key].required && metrics[key] === undefined) {
+          errors.push('Missing mandatory base metric ' + key + ' (' + CVSS4_METRICS[key].name + ').');
+        }
+      });
+      return { ok: errors.length === 0, metrics: metrics, errors: errors, vector: vector };
+    },
+
+    /** Qualitative severity band for a CVSS v4.0 numeric score. */
+    band: function (score) {
+      var s = Number(score);
+      if (!isFinite(s) || s < 0 || s > 10) return null;
+      if (s === 0) return 'None';
+      if (s < 4) return 'Low';
+      if (s < 7) return 'Medium';
+      if (s < 9) return 'High';
+      return 'Critical';
+    },
+
+    BAND_COLORS: {
+      None: '#7d8ba6', Low: '#3f9c63', Medium: '#cbb01f', High: '#e07b1a', Critical: '#c62828'
+    },
+
+    color: function (bandName) {
+      return TM.CVSS4.BAND_COLORS[bandName] || '#7d8ba6';
+    },
+
+    /**
+     * Validate a user-entered assessment (vector + score).
+     * @returns {{ok: boolean, assessment: Object|null, errors: string[]}}
+     */
+    makeAssessment: function (vector, score, rationale) {
+      var parsed = TM.CVSS4.parse(vector);
+      var errors = parsed.errors.slice();
+      var s = Number(String(score).trim());
+      if (String(score).trim() === '' || !isFinite(s)) {
+        errors.push('Enter the base score from the calculator, between 0.0 and 10.0.');
+      } else if (s < 0 || s > 10) {
+        errors.push('A CVSS score must be between 0.0 and 10.0.');
+      }
+      if (errors.length) return { ok: false, assessment: null, errors: errors };
+      return {
+        ok: true,
+        errors: [],
+        assessment: {
+          vector: parsed.vector,
+          score: Math.round(s * 10) / 10,
+          severity: TM.CVSS4.band(s),
+          rationale: String(rationale || '').trim(),
+          updated: new Date().toISOString().slice(0, 10)
+        }
+      };
+    }
+  };
+
+  /** Key under which a threat's CVSS assessment is stored. */
+  TM.assessmentKey = function (elementId, ruleId) {
+    return elementId + '::' + ruleId;
+  };
+
+  /* ---------------------------------------------------------------------
    * Serialisation
    * ------------------------------------------------------------------- */
   TM.serialize = function (model) {
@@ -430,6 +736,24 @@ window.TM = window.TM || {};
     }
     var model = TM.emptyModel();
     model.meta = Object.assign(model.meta, raw.meta || {});
+
+    if (raw.scoring) {
+      var checked = TM.validateScoring(raw.scoring);
+      /* A broken profile in a file must not stop the model from opening. */
+      model.scoring = checked.profile;
+      model.scoringErrors = checked.errors;
+    }
+    if (raw.assessments && typeof raw.assessments === 'object') {
+      Object.keys(raw.assessments).forEach(function (key) {
+        var a = raw.assessments[key];
+        if (!a || typeof a !== 'object') return;
+        var made = TM.CVSS4.makeAssessment(a.vector, a.score, a.rationale);
+        if (made.ok) {
+          made.assessment.updated = str(a.updated) || made.assessment.updated;
+          model.assessments[key] = made.assessment;
+        }
+      });
+    }
     model.nodes = raw.nodes.filter(function (n) {
       return n && TM.TYPES[n.type] && TM.NODE_TYPES.indexOf(n.type) !== -1;
     }).map(function (n) {

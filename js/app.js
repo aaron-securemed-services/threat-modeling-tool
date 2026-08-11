@@ -21,7 +21,11 @@
   function boot() {
     state.diagram = new TM.Diagram($('canvas'), {
       onChange: onModelChanged,
-      onSelect: renderProps,
+      onSelect: function (id, opts) {
+        renderProps(id, opts);
+        $('btnDelete').disabled = !id;
+      },
+      onContextMenu: openContextMenu,
       onStatus: status,
       onZoom: function (k) { $('zoomLabel').textContent = Math.round(k * 100) + '%'; },
       onToolChange: function (tool) {
@@ -35,6 +39,8 @@
     bindPalette();
     bindToolbar();
     bindShortcuts();
+    bindContextMenu();
+    bindReportInteractions();
 
     var restored = loadAutosave();
     setModel(restored || sampleModel(), { resetHistory: true, fit: true });
@@ -135,6 +141,13 @@
     $('btnZoomFit').addEventListener('click', function () { state.diagram.zoomFit(); });
     $('btnUndo').addEventListener('click', undo);
     $('btnRedo').addEventListener('click', redo);
+    $('btnDelete').addEventListener('click', function () {
+      if (!state.diagram.selectionId) return;
+      checkpoint();
+      state.diagram.deleteSelected();
+      $('btnDelete').disabled = true;
+      status('Deleted.');
+    });
 
     $('chkGrid').addEventListener('change', function (e) { state.diagram.setOption('showGrid', e.target.checked); });
     $('chkSnap').addEventListener('change', function (e) { state.diagram.snap = e.target.checked; });
@@ -176,8 +189,16 @@
       var reader = new FileReader();
       reader.onload = function () {
         try {
-          setModel(TM.deserialize(String(reader.result)), { resetHistory: true, fit: true });
-          status('Opened ' + file.name);
+          var opened = TM.deserialize(String(reader.result));
+          var badProfile = opened.scoringErrors && opened.scoringErrors.length;
+          setModel(opened, { resetHistory: true, fit: true });
+          if (badProfile) {
+            status('Opened ' + file.name + ' — its scoring profile was rejected, using the built-in scale.');
+            alert('This file contains a severity scoring profile that could not be used:\n\n' +
+              opened.scoringErrors.join('\n') + '\n\nThe built-in scale is being used instead.');
+          } else {
+            status('Opened ' + file.name);
+          }
         } catch (err) {
           alert('Could not open that file: ' + err.message);
         }
@@ -206,8 +227,22 @@
       status('Exported SVG.');
     });
 
-    $('btnReport').addEventListener('click', openReport);
+    $('btnReport').addEventListener('click', function () { openReport(); });
     $('btnHelp').addEventListener('click', openHelp);
+    $('btnScoring').addEventListener('click', openScoring);
+
+    $('btnScoringTemplate').addEventListener('click', function () {
+      download('stride-scoring-profile-template.json', scoringTemplate(), 'application/json');
+    });
+    $('btnScoringImport').addEventListener('click', function () { $('scoringFileInput').click(); });
+    $('scoringFileInput').addEventListener('change', function (e) {
+      var file = e.target.files && e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () { applyScoringText(String(reader.result)); };
+      reader.readAsText(file);
+      e.target.value = '';
+    });
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-close-modal]'), function (b) {
       b.addEventListener('click', function () {
@@ -261,6 +296,154 @@
         state.diagram.setTool(tool);
       }
     });
+  }
+
+  /* ---------------------------------------------------------------------
+   * Context menu
+   * ------------------------------------------------------------------- */
+  function bindContextMenu() {
+    document.addEventListener('pointerdown', function (e) {
+      var menu = $('contextMenu');
+      if (menu.hidden) return;
+      if (!menu.contains(e.target)) closeContextMenu();
+    }, true);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeContextMenu();
+    });
+    window.addEventListener('blur', closeContextMenu);
+    window.addEventListener('resize', closeContextMenu);
+  }
+
+  function closeContextMenu() {
+    var menu = $('contextMenu');
+    menu.hidden = true;
+    menu.innerHTML = '';
+  }
+
+  /**
+   * Build the right-click menu for whatever was clicked: an element, a data
+   * flow, or empty canvas.
+   */
+  function openContextMenu(id, pos) {
+    var menu = $('contextMenu');
+    menu.innerHTML = '';
+    var el = id ? TM.elementById(state.model, id) : null;
+    var items = [];
+
+    if (el) {
+      items.push({ title: TM.TYPES[el.type].label + ': ' + TM.label(el) });
+      items.push({
+        label: 'Edit properties', shortcut: 'dbl-click',
+        action: function () { state.diagram.select(el.id, { focus: true }); }
+      });
+      if (el.type !== 'flow' && el.type !== 'boundary') {
+        items.push({
+          label: 'Draw data flow from here', shortcut: 'F',
+          action: function () { state.diagram.startFlowFrom(el.id); }
+        });
+      }
+      if (el.type === 'flow') {
+        items.push({
+          label: 'Reverse direction',
+          action: function () {
+            checkpoint();
+            var t = el.from; el.from = el.to; el.to = t;
+            state.diagram.render(); onModelChanged();
+          }
+        });
+        items.push({
+          label: el.bidirectional ? 'Make one-way' : 'Make bidirectional',
+          action: function () {
+            checkpoint();
+            el.bidirectional = !el.bidirectional;
+            state.diagram.render(); onModelChanged();
+          }
+        });
+      }
+      if (el.type !== 'boundary' && el.type !== 'asset') {
+        items.push({
+          label: el.isAsset ? 'Unmark as asset' : 'Mark as asset',
+          action: function () {
+            checkpoint();
+            el.isAsset = !el.isAsset;
+            state.diagram.render(); onModelChanged();
+          }
+        });
+      }
+      if (el.type !== 'flow') {
+        items.push({
+          label: 'Duplicate',
+          action: function () {
+            checkpoint();
+            var copy = JSON.parse(JSON.stringify(el));
+            copy.id = TM.newId(el.type);
+            copy.x += 24; copy.y += 24;
+            state.model.nodes.push(copy);
+            state.diagram.select(copy.id);
+            onModelChanged();
+          }
+        });
+      }
+      items.push({ separator: true });
+      items.push({
+        label: 'Delete', shortcut: 'Del', danger: true,
+        action: function () {
+          checkpoint();
+          state.diagram.deleteById(el.id);
+          $('btnDelete').disabled = true;
+          status('Deleted.');
+        }
+      });
+    } else {
+      items.push({ title: 'Add here' });
+      TM.NODE_TYPES.forEach(function (type) {
+        items.push({
+          label: TM.TYPES[type].label,
+          action: function () { state.diagram.addNode(type, pos.world); }
+        });
+      });
+      items.push({ separator: true });
+      items.push({ label: 'Fit to content', action: function () { state.diagram.zoomFit(); } });
+    }
+
+    items.forEach(function (item) {
+      var li = document.createElement('li');
+      if (item.separator) {
+        li.className = 'menu-sep';
+      } else if (item.title) {
+        li.className = 'menu-title';
+        li.textContent = item.title;
+      } else {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        if (item.danger) btn.className = 'danger';
+        var span = document.createElement('span');
+        span.textContent = item.label;
+        btn.appendChild(span);
+        if (item.shortcut) {
+          var sc = document.createElement('span');
+          sc.className = 'shortcut';
+          sc.textContent = item.shortcut;
+          btn.appendChild(sc);
+        }
+        btn.addEventListener('click', function () {
+          closeContextMenu();
+          item.action();
+        });
+        li.appendChild(btn);
+      }
+      menu.appendChild(li);
+    });
+
+    /* Show first so it can be measured, then keep it inside the viewport. */
+    menu.hidden = false;
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    var rect = menu.getBoundingClientRect();
+    var x = Math.min(pos.clientX, window.innerWidth - rect.width - 8);
+    var y = Math.min(pos.clientY, window.innerHeight - rect.height - 8);
+    menu.style.left = Math.max(4, x) + 'px';
+    menu.style.top = Math.max(4, y) + 'px';
   }
 
   /* ---------------------------------------------------------------------
@@ -552,13 +735,208 @@
   /* ---------------------------------------------------------------------
    * Report
    * ------------------------------------------------------------------- */
-  function openReport() {
+  function openReport(opts) {
+    opts = opts || {};
+    var scrollTop = opts.keepScroll ? $('reportContent').scrollTop : 0;
     var analysis = TM.analyze(state.model);
     state.lastReport = { model: state.model, analysis: analysis };
-    $('reportContent').innerHTML = TM.buildReportHTML(state.model, analysis);
+    $('reportContent').innerHTML = TM.buildReportHTML(state.model, analysis, { interactive: true });
     $('reportModal').hidden = false;
-    $('reportContent').scrollTop = 0;
-    status(analysis.stats.total + ' threat(s) identified.');
+    $('reportContent').scrollTop = scrollTop;
+    if (opts.openCvssKey) {
+      var box = $('reportContent').querySelector('[data-cvss-key="' + cssEscape(opts.openCvssKey) + '"]');
+      if (box) {
+        var form = box.querySelector('[data-cvss-form]');
+        if (form) form.classList.add('open');
+      }
+    }
+    status(analysis.stats.total + ' ' + (analysis.stats.total === 1 ? 'threat' : 'threats') + ' identified.');
+  }
+
+  function cssEscape(s) { return String(s).replace(/["\\]/g, '\\$&'); }
+
+  /* ---------------------------------------------------------------------
+   * CVSS v4.0 entry inside the report
+   * ------------------------------------------------------------------- */
+  function bindReportInteractions() {
+    var root = $('reportContent');
+
+    root.addEventListener('click', function (e) {
+      var toggle = e.target.closest('[data-cvss-toggle]');
+      if (toggle) {
+        var form = toggle.parentNode.querySelector('[data-cvss-form]');
+        if (form) form.classList.toggle('open');
+        return;
+      }
+      var save = e.target.closest('[data-cvss-save]');
+      if (save) { saveCvss(save.closest('[data-cvss-key]')); return; }
+      var clear = e.target.closest('[data-cvss-clear]');
+      if (clear) { clearCvss(clear.closest('[data-cvss-key]')); return; }
+    });
+
+    /* Enter in either field saves, so the form is usable without the mouse. */
+    root.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      var box = e.target.closest && e.target.closest('[data-cvss-key]');
+      if (!box) return;
+      if (!e.target.matches('[data-cvss-vector], [data-cvss-score], [data-cvss-rationale]')) return;
+      e.preventDefault();
+      saveCvss(box);
+    });
+  }
+
+  function saveCvss(box) {
+    if (!box) return;
+    var key = box.getAttribute('data-cvss-key');
+    var vector = box.querySelector('[data-cvss-vector]').value;
+    var score = box.querySelector('[data-cvss-score]').value;
+    var rationaleEl = box.querySelector('[data-cvss-rationale]');
+    var errBox = box.querySelector('[data-cvss-error]');
+
+    var made = TM.CVSS4.makeAssessment(vector, score, rationaleEl ? rationaleEl.value : '');
+    if (!made.ok) {
+      errBox.hidden = false;
+      errBox.innerHTML = made.errors.map(function (m) { return escapeHtml(m); }).join('<br>');
+      return;
+    }
+    errBox.hidden = true;
+    checkpoint();
+    state.model.assessments = state.model.assessments || {};
+    state.model.assessments[key] = made.assessment;
+    autosave();
+    openReport({ keepScroll: true, openCvssKey: key });
+    status('CVSS v4.0 ' + made.assessment.score.toFixed(1) + ' (' + made.assessment.severity + ') recorded.');
+  }
+
+  function clearCvss(box) {
+    if (!box) return;
+    var key = box.getAttribute('data-cvss-key');
+    checkpoint();
+    if (state.model.assessments) delete state.model.assessments[key];
+    autosave();
+    openReport({ keepScroll: true, openCvssKey: key });
+    status('CVSS score removed.');
+  }
+
+  /* ---------------------------------------------------------------------
+   * Severity scoring profiles
+   * ------------------------------------------------------------------- */
+  function openScoring() {
+    renderScoring(TM.serialize(TM.scoringOf(state.model)), null);
+    $('scoringModal').hidden = false;
+  }
+
+  function renderScoring(jsonText, result) {
+    var profile = TM.scoringOf(state.model);
+    var custom = !!state.model.scoring;
+    var box = $('scoringContent');
+
+    var html = [];
+    html.push('<div class="active-profile"><b>Active profile:</b> ' + escapeHtml(profile.name) +
+      (custom ? '' : ' <span class="muted">(built in)</span>') +
+      (profile.description ? '<div class="muted">' + escapeHtml(profile.description) + '</div>' : '') +
+      '</div>');
+
+    html.push('<p>Severity is scored as: <b>base rating of the rule</b> + category points + points for aggravating ' +
+      'diagram context − points for mitigating context, mapped onto the levels below. Import your own profile to ' +
+      'use your organisation\'s severity names, colours, thresholds and weightings. The profile is saved inside the ' +
+      'threat model file.</p>');
+
+    html.push('<table><thead><tr><th>Level</th><th>Applies from score</th><th>Colour</th></tr></thead><tbody>');
+    profile.levels.slice().reverse().forEach(function (lv) {
+      html.push('<tr><td><span class="level-swatch" style="background:' + escapeHtml(lv.color) + '"></span>' +
+        escapeHtml(lv.label) + '</td><td>' + escapeHtml(String(lv.min)) + '</td><td><code>' +
+        escapeHtml(lv.color) + '</code></td></tr>');
+    });
+    html.push('</tbody></table>');
+
+    html.push('<h3>Profile JSON</h3>');
+    html.push('<p class="muted" style="font-size:12px">Edit here, or import a file. ' +
+      '<code>ruleScores</code> overrides the base score of individual rules by id — rule ids appear in the CSV export.</p>');
+    html.push('<textarea id="scoringJson" spellcheck="false"></textarea>');
+    html.push('<div class="scoring-actions">' +
+      '<button class="btn btn-primary btn-sm" id="btnScoringApply">Apply profile</button>' +
+      '<button class="btn btn-sm" id="btnScoringReset">Reset to built-in</button>' +
+      '<button class="btn btn-sm" id="btnScoringDownload">Download this profile</button>' +
+      '<label class="check" style="margin:0 0 0 6px"><input type="checkbox" id="chkCvssOverride"' +
+      (profile.cvss && profile.cvss.useWhenPresent ? ' checked' : '') +
+      '> CVSS scores override modelled severity</label>' +
+      '</div>');
+
+    if (result) {
+      if (result.errors && result.errors.length) {
+        html.push('<div class="validation bad"><b>Not applied — fix these first:</b><ul>' +
+          result.errors.map(function (m) { return '<li>' + escapeHtml(m) + '</li>'; }).join('') + '</ul></div>');
+      } else {
+        html.push('<div class="validation ok"><b>' + escapeHtml(result.message || 'Profile applied.') + '</b>' +
+          (result.warnings && result.warnings.length
+            ? '<ul>' + result.warnings.map(function (m) { return '<li>' + escapeHtml(m) + '</li>'; }).join('') + '</ul>'
+            : '') + '</div>');
+      }
+    }
+
+    box.innerHTML = html.join('');
+    $('scoringJson').value = jsonText;
+
+    $('btnScoringApply').addEventListener('click', function () {
+      applyScoringText($('scoringJson').value);
+    });
+    $('btnScoringReset').addEventListener('click', function () {
+      checkpoint();
+      state.model.scoring = null;
+      autosave();
+      renderScoring(TM.serialize(TM.DEFAULT_SCORING), { message: 'Reset to the built-in scale.', errors: [] });
+      refreshReportIfOpen();
+      status('Severity scoring reset to the built-in scale.');
+    });
+    $('btnScoringDownload').addEventListener('click', function () {
+      download(slug(state.model.meta.name || 'threat-model') + '-scoring-profile.json',
+        $('scoringJson').value, 'application/json');
+    });
+    $('chkCvssOverride').addEventListener('change', function (e) {
+      checkpoint();
+      var p = JSON.parse(TM.serialize(TM.scoringOf(state.model)));
+      p.cvss = { useWhenPresent: e.target.checked };
+      var checked = TM.validateScoring(p);
+      state.model.scoring = checked.profile;
+      autosave();
+      renderScoring(TM.serialize(TM.scoringOf(state.model)), {
+        message: e.target.checked
+          ? 'CVSS scores will override the modelled severity where present.'
+          : 'CVSS scores are recorded but will not override the modelled severity.',
+        errors: []
+      });
+      refreshReportIfOpen();
+    });
+  }
+
+  function applyScoringText(text) {
+    var raw;
+    try {
+      raw = JSON.parse(text);
+    } catch (err) {
+      renderScoring(text, { errors: ['That is not valid JSON: ' + err.message] });
+      return;
+    }
+    var checked = TM.validateScoring(raw);
+    if (!checked.profile) {
+      renderScoring(text, { errors: checked.errors });
+      return;
+    }
+    checkpoint();
+    state.model.scoring = checked.profile;
+    autosave();
+    renderScoring(TM.serialize(checked.profile), {
+      message: 'Applied "' + checked.profile.name + '" with ' + checked.profile.levels.length + ' severity levels.',
+      errors: [],
+      warnings: checked.warnings
+    });
+    refreshReportIfOpen();
+    status('Severity scoring profile applied: ' + checked.profile.name);
+  }
+
+  function refreshReportIfOpen() {
+    if (!$('reportModal').hidden) openReport({ keepScroll: true });
   }
 
   /* ---------------------------------------------------------------------
@@ -576,7 +954,12 @@
       '<ul>',
       '<li>Drag to move, drag a corner handle to resize, drag empty canvas to pan, scroll to zoom.</li>',
       '<li>Dragging a trust boundary moves everything inside it.</li>',
-      '<li>To connect: press the <b>Data flow</b> tool, click the source element, then the destination.</li>',
+      '<li>To connect: press the <b>Data flow</b> tool, click the source element, then the destination. ' +
+      'Each flow gets its own connection point on the edge of an element, so several flows into the same box ' +
+      'stay separate.</li>',
+      '<li><b>Right-click</b> an element for its menu (edit, draw a flow from here, mark as asset, duplicate, ' +
+      'delete), or right-click empty canvas to add an element there. Delete also works from the ' +
+      '<b>Delete selected</b> button and the <kbd>Del</kbd> key.</li>',
       '<li>Any element can be flagged as an <b>asset</b> in the properties panel — it gets the ▲ marker.</li>',
       '<li>A flow drawn between elements that sit in different trust boundaries is drawn dashed and analysed more strictly.</li>',
       '</ul>',
@@ -599,6 +982,18 @@
       }).join(''),
       '</tbody></table>',
       '<p>Download it as Markdown, HTML or CSV (one row per threat, for a risk register), or print to PDF.</p>',
+      '<h3>3a. Severity scoring</h3>',
+      '<p>The built-in scale rates each threat from the rule\'s base rating plus the diagram context. Press ' +
+      '<b>Scoring…</b> to see exactly how that arithmetic works, or to import your own profile: your own severity ' +
+      'names, colours, thresholds, per-category weights and per-rule overrides. The profile is stored inside the ' +
+      'threat model file, so a class or a team all score the same way.</p>',
+      '<h3>3b. CVSS v4.0</h3>',
+      '<p>Any individual threat in the report can carry a <b>CVSS v4.0</b> assessment. Build the vector in the ' +
+      '<a href="' + TM.CVSS4.CALCULATOR_URL + '" target="_blank" rel="noopener">NVD calculator</a>, then paste the ' +
+      'vector and the score it produced into the finding. The vector is validated metric by metric; the score is ' +
+      'taken as entered and its band (None / Low / Medium / High / Critical) replaces the modelled severity, unless ' +
+      'you turn that off under <b>Scoring…</b>. Vectors and scores are saved with the model and appear in every ' +
+      'export.</p>',
       '<h3>4. Export the picture</h3>',
       '<p><b>Export PNG</b> or <b>Export SVG</b> writes the diagram, its title and the legend to an image file. ' +
       'The grid and selection handles are never included.</p>',
@@ -627,6 +1022,42 @@
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  /** A worked example of a custom profile, for people writing their own. */
+  function scoringTemplate() {
+    return JSON.stringify({
+      _readme: [
+        'Severity scoring profile for the STRIDE threat modeling tool.',
+        'Score = baseScores[rule base rating] + categoryPoints[STRIDE letter]',
+        '        + aggravatorPoints that apply - mitigatorPoints that apply.',
+        'The score is then mapped onto the highest level whose "min" it reaches.',
+        'Keys beginning with _ are ignored.'
+      ],
+      name: 'Example: four-point corporate scale',
+      description: 'Replace the levels, colours and weights with your own risk standard.',
+      levels: [
+        { label: 'Observation', color: '#7d8ba6', min: 0 },
+        { label: 'Minor', color: '#3f9c63', min: 2 },
+        { label: 'Moderate', color: '#cbb01f', min: 3 },
+        { label: 'Major', color: '#e07b1a', min: 4 },
+        { label: 'Severe', color: '#c62828', min: 5.5 }
+      ],
+      baseScores: { info: 1, low: 2, medium: 3, high: 4, critical: 6 },
+      categoryPoints: { S: 0, T: 0, R: 0, I: 0.5, D: 0, E: 0.5 },
+      aggravatorPoints: {
+        sensitiveData: 0.5,
+        externalExposure: 0.5,
+        markedAsset: 0.5,
+        safetyCriticalDoS: 0.5
+      },
+      mitigatorPoints: { publicData: 0.5, lowAvailabilityNeed: 0.5 },
+      ruleScores: {
+        'ds-i-rest': 5,
+        'proc-e-chain': 6
+      },
+      cvss: { useWhenPresent: true }
+    }, null, 2);
   }
 
   function slug(s) {

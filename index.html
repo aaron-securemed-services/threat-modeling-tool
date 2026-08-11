@@ -25,6 +25,7 @@
     <button id="btnExportPng" class="btn">Export PNG</button>
     <button id="btnExportSvg" class="btn">Export SVG</button>
     <span class="sep"></span>
+    <button id="btnScoring" class="btn" title="Severity scoring profile and CVSS settings">Scoring…</button>
     <button id="btnReport" class="btn btn-primary">STRIDE report</button>
     <button id="btnHelp" class="btn btn-ghost" title="Help / teaching guide">?</button>
     <input id="fileInput" type="file" accept="application/json,.json" hidden>
@@ -102,6 +103,8 @@
         <button class="btn btn-sm" id="btnUndo" title="Ctrl+Z">Undo</button>
         <button class="btn btn-sm" id="btnRedo" title="Ctrl+Y">Redo</button>
       </div>
+      <button class="btn btn-sm btn-danger btn-block" id="btnDelete" title="Delete the selected element (Del)" disabled>Delete selected</button>
+      <p class="hint" style="margin-top:8px">Right-click the canvas or an element for more actions.</p>
     </div>
   </aside>
 
@@ -142,6 +145,23 @@
     <div class="modal-content report" id="reportContent"></div>
   </div>
 </div>
+
+<div class="modal" id="scoringModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Severity scoring</h2>
+      <div class="modal-head-actions">
+        <button class="btn btn-sm" id="btnScoringTemplate">Download template</button>
+        <button class="btn btn-sm" id="btnScoringImport">Import .json…</button>
+        <button class="btn btn-sm btn-ghost" data-close-modal>Close</button>
+        <input id="scoringFileInput" type="file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+    <div class="modal-content" id="scoringContent"></div>
+  </div>
+</div>
+
+<ul class="context-menu" id="contextMenu" hidden></ul>
 
 <div class="modal" id="helpModal" hidden>
   <div class="modal-box">

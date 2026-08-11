@@ -78,13 +78,11 @@ window.TM = window.TM || {};
   };
 
   /* ---------------------------------------------------------------------
-   * Risk scale
+   * Risk scale - the base ratings a rule may carry. How each of them turns
+   * into a number and a level is decided by the scoring profile in force
+   * (see TM.DEFAULT_SCORING and TM.validateScoring in model.js).
    * ------------------------------------------------------------------- */
   TM.RISK_ORDER = ['info', 'low', 'medium', 'high', 'critical'];
-  var RISK_SCORE = { info: 1, low: 2, medium: 3, high: 4, critical: 5 };
-  function scoreToRisk(n) {
-    return TM.RISK_ORDER[Math.max(0, Math.min(4, Math.round(n) - 1))];
-  }
 
   /* ---------------------------------------------------------------------
    * Small predicates over the annotated categories
@@ -684,32 +682,75 @@ window.TM = window.TM || {};
     };
   }
 
+  /** Which context factors apply to this threat, by profile key. */
+  function contextFactors(el, ctx, cat) {
+    return {
+      aggravators: {
+        sensitiveData: ctx.impact >= 2,
+        externalExposure: ctx.exposureScore >= 2,
+        markedAsset: !!ctx.isAsset,
+        safetyCriticalDoS: cat === 'D' && is(el, 'criticality', 'Critical (safety / life)')
+      },
+      mitigators: {
+        publicData: ctx.impact === 0,
+        lowAvailabilityNeed: cat === 'D' && is(el, 'criticality', 'Low')
+      }
+    };
+  }
+
   /**
-   * A rule's base rating adjusted by diagram context. Deliberately conservative:
-   * context can move a rating by at most one step, and "critical" is reserved
-   * for rules that are critical in themselves or for threats where several
-   * aggravating factors stack up. A report where everything is critical teaches
-   * nothing.
+   * The severity of one finding.
+   *
+   * A user-entered CVSS v4.0 assessment wins when the profile says so;
+   * otherwise the rule's base rating is scored through the profile: base
+   * points, plus per-category points, plus points for aggravating context,
+   * minus points for mitigating context.
    */
-  function adjustRisk(base, el, ctx, cat) {
-    if (base === 'info') return 'info';            /* teaching prompts never inflate */
-    var score = RISK_SCORE[base] || 3;
-
-    var aggravators = 0;
-    if (ctx.impact >= 2) aggravators += 1;         /* confidential or regulated data */
-    if (ctx.exposureScore >= 2) aggravators += 1;  /* internet / anonymous / external boundary */
-    if (ctx.isAsset) aggravators += 1;             /* explicitly marked as an asset */
-    if (cat === 'D' && is(el, 'criticality', 'Critical (safety / life)')) aggravators += 1;
-
-    if (aggravators >= 2) score += 1;
-    if (ctx.impact === 0) score -= 1;              /* public data lowers the stakes */
-    if (cat === 'D' && is(el, 'criticality', 'Low')) score -= 1;
-
-    /* Critical needs either a critical rule or an unusually bad combination. */
-    if (score >= RISK_SCORE.critical && base !== 'critical' && aggravators < 3) {
-      score = RISK_SCORE.high;
+  function severityFor(profile, rule, el, ctx, cat, assessment) {
+    if (assessment && profile.cvss && profile.cvss.useWhenPresent) {
+      return {
+        label: assessment.severity,
+        color: TM.CVSS4.color(assessment.severity),
+        score: assessment.score,
+        sort: 100 + assessment.score,   /* scored threats sort above modelled ones of equal weight */
+        source: 'CVSS 4.0',
+        vector: assessment.vector,
+        rationale: assessment.rationale || ''
+      };
     }
-    return scoreToRisk(score);
+
+    var base = profile.ruleScores && profile.ruleScores[rule.id] !== undefined
+      ? profile.ruleScores[rule.id]
+      : (profile.baseScores[rule.risk] !== undefined ? profile.baseScores[rule.risk] : 3);
+
+    var score = base;
+    var applied = { aggravators: [], mitigators: [] };
+
+    /* Teaching prompts stay informational however bad the surroundings are. */
+    if (rule.risk !== 'info' || profile.ruleScores[rule.id] !== undefined) {
+      score += (profile.categoryPoints && profile.categoryPoints[cat]) || 0;
+      var factors = contextFactors(el, ctx, cat);
+      TM.SCORING_AGGRAVATORS.forEach(function (k) {
+        if (!factors.aggravators[k]) return;
+        score += profile.aggravatorPoints[k] || 0;
+        applied.aggravators.push(k);
+      });
+      TM.SCORING_MITIGATORS.forEach(function (k) {
+        if (!factors.mitigators[k]) return;
+        score -= profile.mitigatorPoints[k] || 0;
+        applied.mitigators.push(k);
+      });
+    }
+
+    var level = TM.levelForScore(profile, score);
+    return {
+      label: level.label,
+      color: level.color,
+      score: Math.round(score * 100) / 100,
+      sort: score,
+      source: 'model',
+      applied: applied
+    };
   }
 
   function fill(text, el, ctx, extra) {
@@ -737,6 +778,12 @@ window.TM = window.TM || {};
     var findings = [];
     var gaps = [];
     var seq = 0;
+    var profile = TM.scoringOf(model);
+    var assessments = model.assessments || {};
+
+    function assessmentFor(elementId, ruleId) {
+      return assessments[TM.assessmentKey(elementId, ruleId)] || null;
+    }
 
     var elements = model.nodes.filter(function (n) { return n.type !== 'boundary'; })
       .concat(model.flows);
@@ -752,6 +799,7 @@ window.TM = window.TM || {};
         try { hit = rule.test(el, ctx); } catch (e) { hit = false; }
         if (!hit) return;
         seq += 1;
+        var assessment = assessmentFor(el.id, rule.id);
         findings.push({
           ref: 'T-' + pad(seq),
           ruleId: rule.id,
@@ -762,7 +810,9 @@ window.TM = window.TM || {};
           title: fill(rule.title, el, ctx),
           threat: fill(rule.threat, el, ctx),
           mitigations: rule.mitigations.slice(),
-          risk: adjustRisk(rule.risk, el, ctx, rule.cat),
+          baseRisk: rule.risk,
+          severity: severityFor(profile, rule, el, ctx, rule.cat, assessment),
+          cvss: assessment,
           existingControls: (el.existingControls || '').trim(),
           crossings: ctx.crossingNames.slice()
         });
@@ -797,9 +847,12 @@ window.TM = window.TM || {};
         if (!hit) return;
         seq += 1;
         var extra = { flow: TM.label(flow), source: TM.label(source) };
+        /* Keyed on the flow as well, so one rule can fire once per inbound flow. */
+        var xRuleId = rule.id + ':' + flow.id;
+        var xAssessment = assessmentFor(target.id, xRuleId);
         findings.push({
           ref: 'T-' + pad(seq),
-          ruleId: rule.id,
+          ruleId: xRuleId,
           elementId: target.id,
           elementType: target.type,
           elementLabel: TM.label(target),
@@ -807,7 +860,9 @@ window.TM = window.TM || {};
           title: fill(rule.title, target, ctx, extra),
           threat: fill(rule.threat, target, ctx, extra),
           mitigations: rule.mitigations.slice(),
-          risk: adjustRisk(rule.risk, target, ctx, rule.cat),
+          baseRisk: rule.risk,
+          severity: severityFor(profile, rule, target, ctx, rule.cat, xAssessment),
+          cvss: xAssessment,
           existingControls: (target.existingControls || '').trim(),
           via: TM.label(flow),
           crossings: ctx.crossingNames.slice()
@@ -844,28 +899,57 @@ window.TM = window.TM || {};
       return row;
     });
 
-    var stats = { total: findings.length, byRisk: {}, byCategory: {} };
-    TM.RISK_ORDER.forEach(function (r) { stats.byRisk[r] = 0; });
+    /* Severity levels present, highest first - the profile's own levels plus
+       any CVSS band that only appears on a scored threat. */
+    var levelIndex = {};
+    profile.levels.forEach(function (lv) {
+      levelIndex[lv.label] = { label: lv.label, color: lv.color, sort: lv.min, count: 0 };
+    });
+    var stats = { total: findings.length, byCategory: {}, byLevel: {}, scored: 0 };
     TM.STRIDE_ORDER.forEach(function (c) { stats.byCategory[c] = 0; });
     findings.forEach(function (f) {
-      stats.byRisk[f.risk] += 1;
+      var label = f.severity.label;
+      if (!levelIndex[label]) {
+        levelIndex[label] = { label: label, color: f.severity.color, sort: f.severity.sort, count: 0 };
+      }
+      levelIndex[label].count += 1;
       stats.byCategory[f.category] += 1;
+      if (f.cvss) stats.scored += 1;
     });
+    stats.levels = Object.keys(levelIndex).map(function (k) { return levelIndex[k]; })
+      .sort(function (a, b) { return b.sort - a.sort; });
+    stats.levels.forEach(function (lv) { stats.byLevel[lv.label] = lv.count; });
     stats.elements = elements.length;
     stats.boundaries = model.nodes.filter(function (n) { return n.type === 'boundary'; }).length;
     stats.flows = model.flows.length;
     stats.assets = model.nodes.filter(function (n) { return n.type === 'asset' || n.isAsset; }).length;
 
     findings.sort(function (a, b) {
-      var d = RISK_SCORE[b.risk] - RISK_SCORE[a.risk];
+      var d = b.severity.sort - a.severity.sort;
       if (d) return d;
       return TM.STRIDE_ORDER.indexOf(a.category) - TM.STRIDE_ORDER.indexOf(b.category);
     });
 
-    return { findings: findings, gaps: gaps, notes: notes, coverage: coverage, stats: stats };
+    return {
+      findings: findings, gaps: gaps, notes: notes, coverage: coverage,
+      stats: stats, profile: profile
+    };
   };
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  /** Every rule id, so a scoring profile's overrides can be checked for typos. */
+  TM.RULE_IDS = RULES.map(function (r) { return r.id; })
+    .concat(FLOW_RULES.map(function (r) { return r.id; }));
+
+  /** Rule metadata for the scoring editor: id, element types, category, base. */
+  TM.ruleCatalogue = function () {
+    return RULES.map(function (r) {
+      return { id: r.id, types: r.types.slice(), category: r.cat, base: r.risk, title: r.title };
+    }).concat(FLOW_RULES.map(function (r) {
+      return { id: r.id, types: r.targets.slice(), category: r.cat, base: r.risk, title: r.title };
+    }));
+  };
 
   /** Exposed for the properties panel: which letters apply to a type. */
   TM.applicableCategories = function (type) {

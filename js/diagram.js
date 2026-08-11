@@ -183,6 +183,8 @@ window.TM = window.TM || {};
     world.appendChild(content);
     this.content = content;
 
+    this.anchors = computeAnchors(this.model);
+
     var boundaryLayer = el('g', { id: 'tm-boundaries' });
     var flowLayer = el('g', { id: 'tm-flows' });
     var nodeLayer = el('g', { id: 'tm-nodes' });
@@ -342,8 +344,9 @@ window.TM = window.TM || {};
     var to = TM.nodeById(this.model, f.to);
     if (!from || !to) return null;
     var selected = f.id === this.selectionId;
-    var a = anchor(from, TM.center(to));
-    var b = anchor(to, TM.center(from));
+    var ports = (this.anchors && this.anchors[f.id]) || {};
+    var a = ports.a || anchor(from, TM.center(to));
+    var b = ports.b || anchor(to, TM.center(from));
     var color = selected ? SELECT_BLUE : INK;
     var crosses = TM.boundariesCrossed(this.model, f).length > 0;
 
@@ -387,6 +390,70 @@ window.TM = window.TM || {};
     }
     return g;
   };
+
+  /* ---------------------------------------------------------------------
+   * Connection points
+   *
+   * Every flow gets its own point on the border of each element it touches.
+   * Flows are assigned to the side of the box facing the other end, then
+   * spread evenly along that side (ordered so lines do not cross each other
+   * needlessly). Without this, several flows into one element all land on the
+   * same spot and the arrowheads pile up.
+   * ------------------------------------------------------------------- */
+  function computeAnchors(model) {
+    var sides = {};   /* nodeId -> { top: [], right: [], bottom: [], left: [] } */
+    var result = {};  /* flowId -> { a: point, b: point } */
+
+    function sideBucket(nodeId) {
+      if (!sides[nodeId]) sides[nodeId] = { top: [], right: [], bottom: [], left: [] };
+      return sides[nodeId];
+    }
+
+    /** Which side of `node` faces `other`, comparing angles against the corners. */
+    function sideFacing(node, other) {
+      var c = TM.center(node), o = TM.center(other);
+      var dx = o.x - c.x, dy = o.y - c.y;
+      if (!dx && !dy) return 'right';
+      /* Normalise by the box aspect so wide boxes still use their long sides. */
+      var nx = dx / Math.max(1, node.w), ny = dy / Math.max(1, node.h);
+      if (Math.abs(nx) >= Math.abs(ny)) return nx >= 0 ? 'right' : 'left';
+      return ny >= 0 ? 'bottom' : 'top';
+    }
+
+    model.flows.forEach(function (f) {
+      var from = TM.nodeById(model, f.from), to = TM.nodeById(model, f.to);
+      if (!from || !to) return;
+      var sa = sideFacing(from, to), sb = sideFacing(to, from);
+      /* Sort key: position of the other end along the axis of this side. */
+      var oa = TM.center(to), ob = TM.center(from);
+      sideBucket(from.id)[sa].push({ flowId: f.id, end: 'a', key: (sa === 'top' || sa === 'bottom') ? oa.x : oa.y });
+      sideBucket(to.id)[sb].push({ flowId: f.id, end: 'b', key: (sb === 'top' || sb === 'bottom') ? ob.x : ob.y });
+      result[f.id] = { a: null, b: null };
+    });
+
+    Object.keys(sides).forEach(function (nodeId) {
+      var node = TM.nodeById(model, nodeId);
+      if (!node) return;
+      ['top', 'right', 'bottom', 'left'].forEach(function (side) {
+        var list = sides[nodeId][side];
+        if (!list.length) return;
+        list.sort(function (p, q) { return p.key - q.key; });
+        /* Keep the usable span away from the corners of the box. */
+        var inset = Math.min(0.22, 0.5 / (list.length + 1));
+        list.forEach(function (item, i) {
+          var t = inset + ((i + 1) / (list.length + 1)) * (1 - inset * 2);
+          var p;
+          if (side === 'top') p = { x: node.x + node.w * t, y: node.y };
+          else if (side === 'bottom') p = { x: node.x + node.w * t, y: node.y + node.h };
+          else if (side === 'left') p = { x: node.x, y: node.y + node.h * t };
+          else p = { x: node.x + node.w, y: node.y + node.h * t };
+          /* Project the box point onto the real outline (ellipse, triangle…). */
+          result[item.flowId][item.end] = anchor(node, p);
+        });
+      });
+    });
+    return result;
+  }
 
   /** Point on the border of `node` in the direction of `toward`. */
   function anchor(node, toward) {
@@ -464,6 +531,10 @@ window.TM = window.TM || {};
     var svg = this.svg;
 
     svg.addEventListener('pointerdown', function (e) {
+      /* Only the primary button draws and drags. A right-press must not take
+         pointer capture, or the contextmenu event that follows is retargeted
+         to the <svg> and the menu loses track of what was clicked. */
+      if (e.button !== undefined && e.button !== 0) return;
       svg.focus();
       var p = self._toWorld(e);
       self.pointer = p;
@@ -493,12 +564,8 @@ window.TM = window.TM || {};
 
       /* placement mode */
       if (TM.NODE_TYPES.indexOf(self.tool) !== -1) {
-        var n = TM.makeNode(self.tool, p.x, p.y);
-        n.x = self._snap(n.x); n.y = self._snap(n.y);
-        self.model.nodes.push(n);
-        self._commit();
+        self.addNode(self.tool, p);
         self.setTool('select');
-        self.select(n.id, { focus: true });
         return;
       }
 
@@ -590,6 +657,22 @@ window.TM = window.TM || {};
     svg.addEventListener('pointerup', endPointer);
     svg.addEventListener('pointercancel', endPointer);
 
+    /* Right-click: select what is under the cursor and ask the app for a menu. */
+    svg.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      /* elementFromPoint rather than e.target: if a drag is in progress the
+         event has been retargeted to the <svg> by pointer capture. */
+      var hit = document.elementFromPoint(e.clientX, e.clientY) || e.target;
+      var group = hit.closest ? hit.closest('[data-id]') : null;
+      var id = group ? group.getAttribute('data-id') : null;
+      self.pointer = self._toWorld(e);
+      self.flowStart = null;
+      self.select(id);
+      if (self.handlers.onContextMenu) {
+        self.handlers.onContextMenu(id, { clientX: e.clientX, clientY: e.clientY, world: self.pointer });
+      }
+    });
+
     svg.addEventListener('dblclick', function (e) {
       var group = e.target.closest ? e.target.closest('[data-id]') : null;
       if (group) self.select(group.getAttribute('data-id'), { focus: true });
@@ -634,6 +717,33 @@ window.TM = window.TM || {};
       var c = { x: n.x + n.w / 2, y: n.y + n.h / 2 };
       return c.x >= b.x && c.x <= b.x + b.w && c.y >= b.y && c.y <= b.y + b.h;
     });
+  };
+
+  /** Place a new node centred on a world-space point. */
+  P.addNode = function (type, world) {
+    var n = TM.makeNode(type, world.x, world.y);
+    n.x = this._snap(n.x);
+    n.y = this._snap(n.y);
+    this.model.nodes.push(n);
+    this._commit();
+    this.select(n.id, { focus: true });
+    return n;
+  };
+
+  /** Begin drawing a data flow out of `nodeId`. */
+  P.startFlowFrom = function (nodeId) {
+    var node = TM.nodeById(this.model, nodeId);
+    if (!node || node.type === 'boundary') return;
+    this.setTool('flow');
+    this.flowStart = nodeId;
+    this.render();
+    this._status('Now click the destination element (Esc to cancel).');
+  };
+
+  P.deleteById = function (id) {
+    if (!id) return;
+    this.selectionId = id;
+    this.deleteSelected();
   };
 
   P.deleteSelected = function () {

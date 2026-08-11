@@ -1,0 +1,34 @@
+{
+  "_readme": [
+    "Example severity scoring profile for the STRIDE threat modeling tool.",
+    "Load it with Scoring... > Import .json, or paste it into the profile editor.",
+    "Score = baseScores[rule base rating] + categoryPoints[STRIDE letter]",
+    "        + aggravatorPoints that apply - mitigatorPoints that apply.",
+    "The score is then mapped onto the highest level whose 'min' it reaches.",
+    "Keys beginning with _ are ignored."
+  ],
+  "name": "Example: healthcare four-tier scale",
+  "description": "Weights confidentiality and privilege escalation more heavily, on the basis that regulated patient data is the dominant risk.",
+  "levels": [
+    { "label": "Observation", "color": "#7d8ba6", "min": 0 },
+    { "label": "Minor", "color": "#3f9c63", "min": 2 },
+    { "label": "Moderate", "color": "#cbb01f", "min": 3 },
+    { "label": "Major", "color": "#e07b1a", "min": 4 },
+    { "label": "Severe", "color": "#c62828", "min": 5.5 }
+  ],
+  "baseScores": { "info": 1, "low": 2, "medium": 3, "high": 4, "critical": 6 },
+  "categoryPoints": { "S": 0, "T": 0, "R": 0.5, "I": 0.5, "D": 0, "E": 0.5 },
+  "aggravatorPoints": {
+    "sensitiveData": 1,
+    "externalExposure": 0.5,
+    "markedAsset": 0.5,
+    "safetyCriticalDoS": 0.5
+  },
+  "mitigatorPoints": { "publicData": 0.5, "lowAvailabilityNeed": 0.5 },
+  "ruleScores": {
+    "ds-i-rest": 6,
+    "ds-r-regulated": 6,
+    "proc-e-chain": 6
+  },
+  "cvss": { "useWhenPresent": true }
+}

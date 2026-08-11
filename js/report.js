@@ -12,8 +12,16 @@ window.TM = window.TM || {};
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
-  function riskPill(risk) {
-    return '<span class="pill pill-' + risk + '">' + risk.toUpperCase() + '</span>';
+  /** Severity chip. Colours come from the scoring profile, so custom scales work. */
+  function sevPill(sev) {
+    return '<span class="pill" style="background:' + esc(sev.color) + '1f;color:' + esc(sev.color) + '">' +
+      esc(String(sev.label).toUpperCase()) + '</span>';
+  }
+  function sevNote(sev) {
+    if (sev.source === 'CVSS 4.0') {
+      return '<span class="muted">CVSS 4.0 base score ' + esc(sev.score.toFixed ? sev.score.toFixed(1) : sev.score) + '</span>';
+    }
+    return '<span class="muted">model score ' + esc(sev.score) + '</span>';
   }
   function catTag(c) {
     return '<span class="stride-tag" title="' + esc(TM.STRIDE[c].name) + '">' + c + '</span>';
@@ -25,7 +33,12 @@ window.TM = window.TM || {};
   /* ---------------------------------------------------------------------
    * HTML report body
    * ------------------------------------------------------------------- */
-  TM.buildReportHTML = function (model, a) {
+  /**
+   * @param opts.interactive when true, each finding gets a CVSS v4.0 entry form
+   *        (used in the app; downloaded reports show the stored values instead).
+   */
+  TM.buildReportHTML = function (model, a, opts) {
+    opts = opts || {};
     var meta = model.meta || {};
     var out = [];
     var name = (meta.name || '').trim() || 'Untitled threat model';
@@ -39,6 +52,11 @@ window.TM = window.TM || {};
     if (meta.date) out.push('<dt>Date</dt><dd>' + esc(meta.date) + '</dd>');
     if (meta.scope) out.push('<dt>Scope / assumptions</dt><dd>' + esc(meta.scope) + '</dd>');
     out.push('<dt>Methodology</dt><dd>STRIDE per element (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege)</dd>');
+    out.push('<dt>Severity scale</dt><dd>' + esc(a.profile.name) +
+      (a.stats.scored
+        ? ' · ' + a.stats.scored + ' of ' + a.stats.total + ' ' +
+          noun(a.stats.total, 'threat', 'threats') + ' scored with CVSS v4.0'
+        : '') + '</dd>');
     out.push('</dl>');
 
     /* ---- summary ---- */
@@ -53,11 +71,23 @@ window.TM = window.TM || {};
       noun(a.stats.assets, 'element', 'elements') + ' marked as ' + noun(a.stats.assets, 'an asset', 'assets') + '. <b>' +
       a.stats.total + '</b> ' + noun(a.stats.total, 'threat was', 'threats were') + ' identified.</p>');
 
-    out.push('<table><thead><tr><th>Risk</th>' +
-      TM.RISK_ORDER.slice().reverse().map(function (r) { return '<th class="num">' + cap(r) + '</th>'; }).join('') +
+    out.push('<table><thead><tr><th>Severity</th>' +
+      a.stats.levels.map(function (lv) {
+        return '<th class="num"><span class="level-swatch" style="background:' + esc(lv.color) + '"></span>' + esc(lv.label) + '</th>';
+      }).join('') +
       '<th class="num">Total</th></tr></thead><tbody><tr><td>Threats</td>' +
-      TM.RISK_ORDER.slice().reverse().map(function (r) { return '<td class="num">' + a.stats.byRisk[r] + '</td>'; }).join('') +
+      a.stats.levels.map(function (lv) { return '<td class="num">' + lv.count + '</td>'; }).join('') +
       '<td class="num"><b>' + a.stats.total + '</b></td></tr></tbody></table>');
+
+    if (a.stats.scored) {
+      var profileLabels = a.profile.levels.map(function (lv) { return lv.label; });
+      var mixed = a.stats.levels.some(function (lv) { return profileLabels.indexOf(lv.label) === -1; });
+      out.push('<p class="muted">' + a.stats.scored + ' of these ' +
+        noun(a.stats.total, 'threat carries', 'threats carry') + ' a CVSS v4.0 assessment' +
+        (mixed
+          ? ', counted above under its CVSS band (None / Low / Medium / High / Critical) rather than under the levels of "' + esc(a.profile.name) + '".'
+          : '.') + '</p>');
+    }
 
     out.push('<table><thead><tr><th>STRIDE category</th><th>Security property</th><th class="num">Threats</th></tr></thead><tbody>');
     TM.STRIDE_ORDER.forEach(function (c) {
@@ -151,9 +181,9 @@ window.TM = window.TM || {};
         out.push('<h3>' + esc(list[0].elementLabel) + ' <span class="muted">(' + typeLabel(list[0].elementType) + ')</span></h3>');
         if (elx && elx.description) out.push('<p class="muted">' + esc(elx.description) + '</p>');
         list.forEach(function (f) {
-          out.push('<div class="finding finding-' + f.risk + '">');
+          out.push('<div class="finding" style="border-left-color:' + esc(f.severity.color) + '">');
           out.push('<div class="finding-head">' + catTag(f.category) + ' <strong>' + esc(f.ref) + ' · ' +
-            esc(f.title) + '</strong> ' + riskPill(f.risk) +
+            esc(f.title) + '</strong> ' + sevPill(f.severity) + ' ' + sevNote(f.severity) +
             ' <span class="muted">' + esc(TM.STRIDE[f.category].name) + ' — ' + esc(TM.STRIDE[f.category].property) + '</span></div>');
           out.push('<div>' + esc(f.threat) + '</div>');
           if (f.via) out.push('<div class="muted">Via data flow: ' + esc(f.via) + '</div>');
@@ -165,6 +195,7 @@ window.TM = window.TM || {};
           }
           out.push('<div class="mitig"><b>Recommended mitigations</b><ul>' +
             f.mitigations.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul></div>');
+          out.push(cvssBlock(f, opts.interactive));
           out.push('</div>');
         });
       });
@@ -201,17 +232,112 @@ window.TM = window.TM || {};
     });
     out.push('</tbody></table>');
 
-    out.push('<h2>Appendix B · How risk was rated</h2>');
-    out.push('<p>Each rule carries a base rating, which is then adjusted by the diagram context. Aggravating factors ' +
-      'are: confidential or regulated data; an internet-facing, anonymous-facing element or a flow crossing an ' +
-      'external trust boundary; the element being marked as an asset; and, for denial-of-service threats, a ' +
-      'safety-critical availability need. Two or more aggravating factors raise the rating by one step; public data ' +
-      'or a low availability need lowers it by one. <b>Critical</b> is reserved for threats that are critical in ' +
-      'themselves or that carry three aggravating factors. Ratings are a starting point for the discussion, not a ' +
-      'substitute for your own risk acceptance process.</p>');
+    out.push('<h2>Appendix B · How severity was rated</h2>');
+    var p = a.profile;
+    out.push('<p>Severity scale in force: <b>' + esc(p.name) + '</b>' +
+      (p.description ? ' — ' + esc(p.description) : '') + '.</p>');
+    out.push('<p>Each rule carries a base rating, which is converted to a number and then adjusted by the diagram ' +
+      'context: points are added for aggravating factors and subtracted for mitigating ones. The result is mapped ' +
+      'onto the levels below.</p>');
+
+    out.push('<table><thead><tr><th>Level</th><th class="num">Score from</th></tr></thead><tbody>');
+    p.levels.slice().reverse().forEach(function (lv) {
+      out.push('<tr><td><span class="level-swatch" style="background:' + esc(lv.color) + '"></span>' +
+        esc(lv.label) + '</td><td class="num">' + esc(lv.min) + '</td></tr>');
+    });
+    out.push('</tbody></table>');
+
+    out.push('<table><thead><tr><th>Factor</th><th class="num">Points</th></tr></thead><tbody>');
+    ['info', 'low', 'medium', 'high', 'critical'].forEach(function (k) {
+      out.push('<tr><td>Base rating: ' + cap(k) + '</td><td class="num">' + esc(p.baseScores[k]) + '</td></tr>');
+    });
+    var factorLabels = {
+      sensitiveData: 'Aggravating: confidential or regulated data',
+      externalExposure: 'Aggravating: internet-facing, anonymous-facing, or crosses an external boundary',
+      markedAsset: 'Aggravating: element is marked as an asset',
+      safetyCriticalDoS: 'Aggravating: availability threat to a safety-critical element',
+      publicData: 'Mitigating: data is public',
+      lowAvailabilityNeed: 'Mitigating: low availability need'
+    };
+    TM.SCORING_AGGRAVATORS.forEach(function (k) {
+      out.push('<tr><td>' + esc(factorLabels[k]) + '</td><td class="num">+' + esc(p.aggravatorPoints[k]) + '</td></tr>');
+    });
+    TM.SCORING_MITIGATORS.forEach(function (k) {
+      out.push('<tr><td>' + esc(factorLabels[k]) + '</td><td class="num">−' + esc(p.mitigatorPoints[k]) + '</td></tr>');
+    });
+    TM.STRIDE_ORDER.forEach(function (c) {
+      if (!p.categoryPoints[c]) return;
+      out.push('<tr><td>Category adjustment: ' + c + ' — ' + esc(TM.STRIDE[c].name) + '</td><td class="num">' +
+        (p.categoryPoints[c] > 0 ? '+' : '') + esc(p.categoryPoints[c]) + '</td></tr>');
+    });
+    out.push('</tbody></table>');
+
+    var overrides = Object.keys(p.ruleScores || {});
+    if (overrides.length) {
+      out.push('<p>Per-rule overrides in this profile: ' +
+        overrides.map(function (id) { return '<code>' + esc(id) + '</code> → ' + esc(p.ruleScores[id]); }).join(', ') + '.</p>');
+    }
+
+    out.push('<h3>CVSS v4.0</h3>');
+    out.push('<p>' + (p.cvss && p.cvss.useWhenPresent
+      ? 'Where a CVSS v4.0 vector and base score have been entered for a threat, that score and its qualitative band replace the modelled rating, and the finding is labelled with its vector.'
+      : 'CVSS v4.0 assessments are recorded but the profile is configured not to let them override the modelled rating.') +
+      ' Vectors are validated against the CVSS v4.0 specification; the numeric score is entered by the assessor from the ' +
+      '<a href="' + TM.CVSS4.CALCULATOR_URL + '" target="_blank" rel="noopener">NVD CVSS v4.0 calculator</a>. ' +
+      'CVSS bands are None (0.0), Low (0.1–3.9), Medium (4.0–6.9), High (7.0–8.9) and Critical (9.0–10.0).</p>');
+    out.push('<p class="muted">Ratings are a starting point for the discussion, not a substitute for your own risk ' +
+      'acceptance process.</p>');
 
     return out.join('\n');
   };
+
+  /**
+   * The CVSS v4.0 panel for one finding. Interactive in the app (an editable
+   * vector + score that is stored on the model); a static record of what was
+   * entered in a downloaded report.
+   */
+  function cvssBlock(f, interactive) {
+    var key = TM.assessmentKey(f.elementId, f.ruleId);
+    var current = f.cvss;
+    var out = ['<div class="cvss-box" data-cvss-key="' + esc(key) + '">'];
+
+    if (current) {
+      out.push('<div class="cvss-current"><b>CVSS v4.0</b> ' +
+        '<span class="pill" style="background:' + esc(TM.CVSS4.color(current.severity)) + '1f;color:' +
+        esc(TM.CVSS4.color(current.severity)) + '">' + esc(current.severity.toUpperCase()) + ' ' +
+        esc(Number(current.score).toFixed(1)) + '</span> <code>' + esc(current.vector) + '</code>' +
+        (current.updated ? ' <span class="muted">· entered ' + esc(current.updated) + '</span>' : '') +
+        (current.rationale ? '<div class="muted">' + esc(current.rationale) + '</div>' : '') +
+        '</div>');
+    } else if (!interactive) {
+      out.push('<div class="cvss-current muted">No CVSS v4.0 score recorded; severity is from the ' +
+        'scoring profile.</div>');
+    }
+
+    if (interactive) {
+      out.push('<button type="button" class="cvss-toggle" data-cvss-toggle>' +
+        (current ? 'Edit CVSS v4.0 score' : 'Add a CVSS v4.0 score') + '</button>');
+      out.push('<div class="cvss-form" data-cvss-form>');
+      out.push('<div class="cvss-row">' +
+        '<input type="text" data-cvss-vector spellcheck="false" placeholder="CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N" value="' +
+        esc(current ? current.vector : '') + '">' +
+        '<input type="text" class="cvss-score" data-cvss-score placeholder="0.0–10.0" value="' +
+        esc(current ? current.score : '') + '">' +
+        '<button type="button" class="btn btn-sm" data-cvss-save>Save</button>' +
+        (current ? '<button type="button" class="btn btn-sm btn-danger" data-cvss-clear>Remove</button>' : '') +
+        '</div>');
+      out.push('<div class="cvss-row" style="margin-top:6px"><input type="text" data-cvss-rationale ' +
+        'style="font-family:inherit" placeholder="Optional note: why this score" value="' +
+        esc(current ? current.rationale : '') + '"></div>');
+      out.push('<div class="cvss-help">Build the vector in the ' +
+        '<a href="' + TM.CVSS4.CALCULATOR_URL + '" target="_blank" rel="noopener">NVD CVSS v4.0 calculator</a>, ' +
+        'then paste the vector string and the score it produced. The vector is validated here; the score is taken as entered.</div>');
+      out.push('<div class="cvss-error" data-cvss-error hidden></div>');
+      out.push('</div>');
+    }
+    out.push('</div>');
+    return out.join('');
+  }
 
   function noun(n, one, many) { return n === 1 ? one : many; }
   function pl(n, one, many) { return n + ' ' + noun(n, one, many); }
@@ -272,6 +398,8 @@ window.TM = window.TM || {};
     if (meta.date) L.push('- **Date:** ' + meta.date);
     if (meta.scope) L.push('- **Scope / assumptions:** ' + meta.scope);
     L.push('- **Methodology:** STRIDE per element');
+    L.push('- **Severity scale:** ' + a.profile.name +
+      (a.stats.scored ? ' (' + a.stats.scored + ' of ' + a.stats.total + ' threats scored with CVSS v4.0)' : ''));
     L.push('');
 
     L.push('## 1. Summary');
@@ -284,9 +412,9 @@ window.TM = window.TM || {};
     L.push('| Assets | ' + a.stats.assets + ' |');
     L.push('| Threats identified | ' + a.stats.total + ' |');
     L.push('');
-    L.push('| Risk | ' + TM.RISK_ORDER.slice().reverse().map(cap).join(' | ') + ' |');
-    L.push('| --- |' + TM.RISK_ORDER.map(function () { return ' --- |'; }).join(''));
-    L.push('| Threats | ' + TM.RISK_ORDER.slice().reverse().map(function (r) { return a.stats.byRisk[r]; }).join(' | ') + ' |');
+    L.push('| Severity | ' + a.stats.levels.map(function (lv) { return md(lv.label); }).join(' | ') + ' |');
+    L.push('| --- |' + a.stats.levels.map(function () { return ' --- |'; }).join(''));
+    L.push('| Threats | ' + a.stats.levels.map(function (lv) { return lv.count; }).join(' | ') + ' |');
     L.push('');
     L.push('| STRIDE | Property | Threats |');
     L.push('| --- | --- | --- |');
@@ -374,10 +502,16 @@ window.TM = window.TM || {};
         L.push('');
         if (elx && elx.description) { L.push('_' + elx.description + '_'); L.push(''); }
         list.forEach(function (f) {
-          L.push('#### ' + f.ref + ' · [' + f.category + '] ' + f.title + ' — **' + f.risk.toUpperCase() + '**');
+          L.push('#### ' + f.ref + ' · [' + f.category + '] ' + f.title + ' — **' +
+            String(f.severity.label).toUpperCase() + '**');
           L.push('');
           L.push('_' + TM.STRIDE[f.category].name + ' — violates ' + TM.STRIDE[f.category].property + '_');
           L.push('');
+          if (f.cvss) {
+            L.push('**CVSS v4.0:** ' + Number(f.cvss.score).toFixed(1) + ' (' + f.cvss.severity + ') — `' +
+              f.cvss.vector + '`' + (f.cvss.rationale ? ' — ' + f.cvss.rationale : ''));
+            L.push('');
+          }
           L.push(f.threat);
           L.push('');
           if (f.via) { L.push('Via data flow: ' + f.via); L.push(''); }
@@ -416,6 +550,36 @@ window.TM = window.TM || {};
       L.push('| ' + c + ' | ' + s.name + ' | ' + s.property + ' | ' + s.definition + ' | ' + applies + ' |');
     });
     L.push('');
+
+    L.push('## Appendix B · How severity was rated');
+    L.push('');
+    L.push('Severity scale in force: **' + a.profile.name + '**' +
+      (a.profile.description ? ' — ' + a.profile.description : ''));
+    L.push('');
+    L.push('| Level | Score from |');
+    L.push('| --- | --- |');
+    a.profile.levels.slice().reverse().forEach(function (lv) {
+      L.push('| ' + md(lv.label) + ' | ' + lv.min + ' |');
+    });
+    L.push('');
+    L.push('| Factor | Points |');
+    L.push('| --- | --- |');
+    ['info', 'low', 'medium', 'high', 'critical'].forEach(function (k) {
+      L.push('| Base rating: ' + cap(k) + ' | ' + a.profile.baseScores[k] + ' |');
+    });
+    TM.SCORING_AGGRAVATORS.forEach(function (k) {
+      L.push('| Aggravating: ' + k + ' | +' + a.profile.aggravatorPoints[k] + ' |');
+    });
+    TM.SCORING_MITIGATORS.forEach(function (k) {
+      L.push('| Mitigating: ' + k + ' | -' + a.profile.mitigatorPoints[k] + ' |');
+    });
+    L.push('');
+    L.push('CVSS v4.0 assessments ' + (a.profile.cvss && a.profile.cvss.useWhenPresent
+      ? 'override the modelled rating where present.'
+      : 'are recorded but do not override the modelled rating.') +
+      ' Vectors are validated against the CVSS v4.0 specification; scores are entered from the ' +
+      'NVD calculator (' + TM.CVSS4.CALCULATOR_URL + ').');
+    L.push('');
     return L.join('\n');
   };
 
@@ -426,15 +590,19 @@ window.TM = window.TM || {};
    * ------------------------------------------------------------------- */
   TM.buildReportCSV = function (model, a) {
     var head = ['Ref', 'Element', 'Element type', 'STRIDE', 'Category', 'Property violated',
-      'Threat title', 'Threat description', 'Risk', 'Crosses boundary', 'Via flow',
-      'Existing controls', 'Recommended mitigations'];
+      'Threat title', 'Threat description', 'Severity', 'Severity source', 'Score',
+      'CVSS v4.0 vector', 'CVSS v4.0 score', 'CVSS rationale',
+      'Crosses boundary', 'Via flow', 'Existing controls', 'Recommended mitigations', 'Rule id'];
     var rows = [head];
     a.findings.forEach(function (f) {
       rows.push([
         f.ref, f.elementLabel, typeLabel(f.elementType), f.category, TM.STRIDE[f.category].name,
-        TM.STRIDE[f.category].property, f.title, f.threat, f.risk.toUpperCase(),
+        TM.STRIDE[f.category].property, f.title, f.threat,
+        String(f.severity.label).toUpperCase(), f.severity.source, f.severity.score,
+        f.cvss ? f.cvss.vector : '', f.cvss ? Number(f.cvss.score).toFixed(1) : '',
+        f.cvss ? f.cvss.rationale : '',
         (f.crossings || []).join('; '), f.via || '', f.existingControls || '',
-        f.mitigations.join(' | ')
+        f.mitigations.join(' | '), f.ruleId
       ]);
     });
     return rows.map(function (r) {
