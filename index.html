@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STRIDE Threat Modeling Tool</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="app-bar">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5l8-3z" fill="#2d6cdf"/></svg>
+    <span>STRIDE Threat Modeling Tool</span>
+  </div>
+  <div class="model-name">
+    <input id="modelName" type="text" placeholder="Untitled threat model" aria-label="Model name">
+  </div>
+  <div class="app-actions">
+    <button id="btnNew" class="btn">New</button>
+    <button id="btnOpen" class="btn">Open…</button>
+    <button id="btnSave" class="btn">Save .json</button>
+    <button id="btnSample" class="btn">Load example</button>
+    <span class="sep"></span>
+    <button id="btnExportPng" class="btn">Export PNG</button>
+    <button id="btnExportSvg" class="btn">Export SVG</button>
+    <span class="sep"></span>
+    <button id="btnReport" class="btn btn-primary">STRIDE report</button>
+    <button id="btnHelp" class="btn btn-ghost" title="Help / teaching guide">?</button>
+    <input id="fileInput" type="file" accept="application/json,.json" hidden>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ------------------------------ PALETTE ------------------------------ -->
+  <aside class="palette" id="palette">
+    <h2>Elements</h2>
+    <p class="hint">Pick a tool, then click the canvas.</p>
+
+    <button class="tool" data-tool="select" title="Select / move (V)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 24 24" width="34" height="26"><path d="M5 3l13 8-6 1.4L9.6 19z" fill="#40465a"/></svg>
+      </span>
+      <span class="tool-label">Select<em>V</em></span>
+    </button>
+
+    <button class="tool" data-tool="entity" title="Entity (E)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 60 34" width="46" height="26"><rect x="4" y="5" width="52" height="24" fill="#fff" stroke="#1f2430" stroke-width="2"/></svg>
+      </span>
+      <span class="tool-label">Entity<em>E</em></span>
+    </button>
+
+    <button class="tool" data-tool="process" title="Process (P)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 60 34" width="46" height="26"><ellipse cx="30" cy="17" rx="26" ry="12" fill="#fff" stroke="#1f2430" stroke-width="2"/></svg>
+      </span>
+      <span class="tool-label">Process<em>P</em></span>
+    </button>
+
+    <button class="tool" data-tool="datastore" title="Data store (D)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 60 34" width="46" height="26"><path d="M4 6h52M4 28h52" stroke="#1f2430" stroke-width="2.5" fill="none"/><rect x="4" y="6" width="52" height="22" fill="#fff" opacity=".01"/></svg>
+      </span>
+      <span class="tool-label">Data store<em>D</em></span>
+    </button>
+
+    <button class="tool" data-tool="flow" title="Data flow (F)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 60 34" width="46" height="26"><path d="M6 17h40" stroke="#1f2430" stroke-width="2" fill="none" marker-end="url(#pal-arrow)"/><defs><marker id="pal-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#1f2430"/></marker></defs></svg>
+      </span>
+      <span class="tool-label">Data flow<em>F</em></span>
+    </button>
+
+    <button class="tool" data-tool="boundary" title="Trust boundary (B)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 60 34" width="46" height="26"><rect x="4" y="5" width="52" height="24" fill="none" stroke="#e23b3b" stroke-width="2" stroke-dasharray="6 4"/></svg>
+      </span>
+      <span class="tool-label">Trust boundary<em>B</em></span>
+    </button>
+
+    <button class="tool" data-tool="asset" title="Asset (A)">
+      <span class="tool-icon">
+        <svg viewBox="0 0 60 34" width="46" height="26"><path d="M30 6l14 23H16z" fill="#2b6b86"/></svg>
+      </span>
+      <span class="tool-label">Asset<em>A</em></span>
+    </button>
+
+    <div class="palette-foot">
+      <h3>Canvas</h3>
+      <div class="zoom-row">
+        <button class="btn btn-sm" id="btnZoomOut">−</button>
+        <span id="zoomLabel">100%</span>
+        <button class="btn btn-sm" id="btnZoomIn">+</button>
+        <button class="btn btn-sm" id="btnZoomFit">Fit</button>
+      </div>
+      <label class="check"><input type="checkbox" id="chkGrid" checked> Show grid</label>
+      <label class="check"><input type="checkbox" id="chkSnap" checked> Snap to grid</label>
+      <label class="check"><input type="checkbox" id="chkLegend" checked> Legend on diagram</label>
+      <div class="zoom-row">
+        <button class="btn btn-sm" id="btnUndo" title="Ctrl+Z">Undo</button>
+        <button class="btn btn-sm" id="btnRedo" title="Ctrl+Y">Redo</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ------------------------------- CANVAS ------------------------------ -->
+  <section class="canvas-wrap">
+    <div class="canvas-banner" id="banner" hidden></div>
+    <svg id="canvas" class="canvas" tabindex="0"></svg>
+    <div class="status-bar">
+      <span id="statusMsg">Ready.</span>
+      <span id="statusCounts"></span>
+    </div>
+  </section>
+
+  <!-- ----------------------------- PROPERTIES ---------------------------- -->
+  <aside class="props" id="props">
+    <div class="props-empty" id="propsEmpty">
+      <h2>Properties</h2>
+      <p>Select an element or data flow to edit its title, description and security categories.</p>
+      <p>The categories you set here drive the generated STRIDE report.</p>
+    </div>
+    <div class="props-body" id="propsBody" hidden></div>
+  </aside>
+</main>
+
+<!-- ------------------------------- MODALS -------------------------------- -->
+<div class="modal" id="reportModal" hidden>
+  <div class="modal-box modal-lg">
+    <div class="modal-head">
+      <h2>STRIDE threat report</h2>
+      <div class="modal-head-actions">
+        <button class="btn btn-sm" id="btnReportMd">Download .md</button>
+        <button class="btn btn-sm" id="btnReportHtml">Download .html</button>
+        <button class="btn btn-sm" id="btnReportCsv">Download .csv</button>
+        <button class="btn btn-sm" id="btnReportPrint">Print / PDF</button>
+        <button class="btn btn-sm btn-ghost" data-close-modal>Close</button>
+      </div>
+    </div>
+    <div class="modal-content report" id="reportContent"></div>
+  </div>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>How to use this tool</h2>
+      <button class="btn btn-sm btn-ghost" data-close-modal>Close</button>
+    </div>
+    <div class="modal-content" id="helpContent"></div>
+  </div>
+</div>
+
+<script src="js/model.js"></script>
+<script src="js/stride.js"></script>
+<script src="js/diagram.js"></script>
+<script src="js/report.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

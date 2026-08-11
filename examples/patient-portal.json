@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "name": "Patient portal (worked example)",
+    "system": "Web portal that lets patients view results and message their clinician",
+    "author": "Teaching example",
+    "date": "2026-08-11",
+    "scope": "In scope: the portal web tier, its API, the records database and the billing integration. Out of scope: the clinical EHR itself, corporate IT and physical security of the data centre."
+  },
+  "nodes": [
+    {
+      "id": "boundary-msot0eq9-h",
+      "type": "boundary",
+      "x": 40,
+      "y": 40,
+      "w": 360,
+      "h": 480,
+      "title": "Internet",
+      "description": "Anything outside our control.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "boundaryKind": "Internet / DMZ perimeter"
+      }
+    },
+    {
+      "id": "boundary-msot0eq9-i",
+      "type": "boundary",
+      "x": 460,
+      "y": 40,
+      "w": 620,
+      "h": 480,
+      "title": "Hosting VPC (internal network)",
+      "description": "Our managed cloud environment.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "boundaryKind": "Network segment"
+      }
+    },
+    {
+      "id": "entity-msot0eq9-j",
+      "type": "entity",
+      "x": 100,
+      "y": 120,
+      "w": 160,
+      "h": 70,
+      "title": "Patient",
+      "description": "Members of the public using the portal from their own devices.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "entityKind": "Human user",
+        "trustLevel": "Untrusted (anonymous)",
+        "authentication": "Username + password",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "entity-msot0eq9-k",
+      "type": "entity",
+      "x": 100,
+      "y": 260,
+      "w": 160,
+      "h": 70,
+      "title": "Clinician",
+      "description": "Staff replying to messages and releasing results.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "entityKind": "Privileged user / administrator",
+        "trustLevel": "Semi-trusted (authenticated)",
+        "authentication": "Username + password",
+        "logging": "Security events logged",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High"
+      }
+    },
+    {
+      "id": "entity-msot0eq9-l",
+      "type": "entity",
+      "x": 100,
+      "y": 400,
+      "w": 160,
+      "h": 70,
+      "title": "Billing SaaS",
+      "description": "Third-party billing provider.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "entityKind": "Third-party service",
+        "trustLevel": "Semi-trusted (authenticated)",
+        "authentication": "Shared secret or API key",
+        "logging": "None",
+        "dataClassification": "Confidential",
+        "criticality": "Low"
+      }
+    },
+    {
+      "id": "process-msot0eq9-m",
+      "type": "process",
+      "x": 520,
+      "y": 110,
+      "w": 180,
+      "h": 92,
+      "title": "Portal web app",
+      "description": "Server-rendered front end.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "exposure": "Internet-facing",
+        "privilege": "Least privilege",
+        "inputValidation": "Partial / deny-list",
+        "resilience": "Timeouts only",
+        "authentication": "Session token / JWT",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Security events logged",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "owner": "Portal team"
+      }
+    },
+    {
+      "id": "process-msot0eq9-n",
+      "type": "process",
+      "x": 790,
+      "y": 110,
+      "w": 180,
+      "h": 92,
+      "title": "Records API",
+      "description": "Reads and writes patient records.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "exposure": "Internal network",
+        "privilege": "Elevated service account",
+        "inputValidation": "None",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "Simple ownership check",
+        "logging": "Errors only",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "owner": "Platform team"
+      }
+    },
+    {
+      "id": "datastore-msot0eq9-o",
+      "type": "datastore",
+      "x": 790,
+      "y": 290,
+      "w": 190,
+      "h": 76,
+      "title": "Patient records DB",
+      "description": "PostgreSQL: results, messages, demographics.",
+      "isAsset": true,
+      "existingControls": "",
+      "props": {
+        "storeKind": "Relational database",
+        "encryptionAtRest": "Full-disk / volume",
+        "integrity": "Constraints / checksums",
+        "backup": "Backups, never tested",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)",
+        "owner": "Platform team"
+      }
+    },
+    {
+      "id": "datastore-msot0eq9-p",
+      "type": "datastore",
+      "x": 520,
+      "y": 290,
+      "w": 190,
+      "h": 76,
+      "title": "Application log store",
+      "description": "Aggregated application and access logs.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "storeKind": "Object / blob storage",
+        "encryptionAtRest": "None",
+        "integrity": "None",
+        "backup": "Tested backups with retention",
+        "authentication": "Session token / JWT",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Errors only",
+        "dataClassification": "Confidential",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "asset-msot0eq9-q",
+      "type": "asset",
+      "x": 620,
+      "y": 420,
+      "w": 96,
+      "h": 82,
+      "title": "PHI",
+      "description": "",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "assetKind": "Information",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)",
+        "owner": "Chief Privacy Officer"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow-msot0eq9-r",
+      "type": "flow",
+      "from": "entity-msot0eq9-j",
+      "to": "process-msot0eq9-m",
+      "bidirectional": true,
+      "title": "Portal session",
+      "description": "Login, results, secure messaging.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "HTTPS / TLS",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "None",
+        "authentication": "Session token / JWT",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Security events logged",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High"
+      }
+    },
+    {
+      "id": "flow-msot0eq9-s",
+      "type": "flow",
+      "from": "entity-msot0eq9-k",
+      "to": "process-msot0eq9-m",
+      "bidirectional": true,
+      "title": "Clinician workspace",
+      "description": "Review and release results, reply to messages.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "HTTPS / TLS",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "Timeouts only",
+        "authentication": "Username + password",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Security events logged",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High"
+      }
+    },
+    {
+      "id": "flow-msot0eq9-t",
+      "type": "flow",
+      "from": "process-msot0eq9-m",
+      "to": "process-msot0eq9-n",
+      "bidirectional": true,
+      "title": "Record lookup",
+      "description": "Internal service call.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "HTTP (cleartext)",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High"
+      }
+    },
+    {
+      "id": "flow-msot0eq9-u",
+      "type": "flow",
+      "from": "process-msot0eq9-n",
+      "to": "datastore-msot0eq9-o",
+      "bidirectional": true,
+      "title": "SQL queries",
+      "description": "Reads and writes patient records.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "SQL / database protocol",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "None",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)"
+      }
+    },
+    {
+      "id": "flow-msot0eq9-v",
+      "type": "flow",
+      "from": "process-msot0eq9-m",
+      "to": "datastore-msot0eq9-p",
+      "bidirectional": false,
+      "title": "Application logs",
+      "description": "Request and error logs shipped to the log store.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "HTTPS / TLS",
+        "encryptionInTransit": "TLS (server authenticated)",
+        "flowIntegrity": "Transport (TLS) only",
+        "throttling": "Timeouts only",
+        "authentication": "Shared secret or API key",
+        "authorization": "Role-based (RBAC)",
+        "logging": "Errors only",
+        "dataClassification": "Confidential",
+        "criticality": "Low"
+      }
+    },
+    {
+      "id": "flow-msot0eq9-w",
+      "type": "flow",
+      "from": "process-msot0eq9-n",
+      "to": "entity-msot0eq9-l",
+      "bidirectional": false,
+      "title": "Billing export",
+      "description": "Nightly claim export.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Low"
+      }
+    }
+  ]
+}
