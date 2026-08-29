@@ -1,6 +1,7 @@
 /* ---------------------------------------------------------------------------
  * app.js - wiring: palette, properties panel, model metadata, file IO,
- * exports, the report modal and the worked example.
+ * exports, the report modal and the example picker. The examples themselves
+ * live in js/examples.js.
  * --------------------------------------------------------------------------- */
 (function (TM) {
   'use strict';
@@ -37,14 +38,18 @@
     });
 
     bindPalette();
+    bindExamplePicker();
     bindToolbar();
     bindShortcuts();
     bindContextMenu();
     bindReportInteractions();
 
     var restored = loadAutosave();
-    setModel(restored || sampleModel(), { resetHistory: true, fit: true });
-    if (!restored) status('Loaded the worked example. Press ? in the toolbar for the teaching guide.');
+    setModel(restored || TM.buildExample(TM.DEFAULT_EXAMPLE), { resetHistory: true, fit: true });
+    if (!restored) {
+      status('Loaded the ' + TM.example(TM.DEFAULT_EXAMPLE).label.toLowerCase() +
+        ' example. Pick another from Examples, or press ? for the teaching guide.');
+    }
     state.diagram.setTool('select');
   }
 
@@ -154,6 +159,35 @@
     $('chkLegend').addEventListener('change', function (e) { state.diagram.setOption('showLegend', e.target.checked); });
   }
 
+  /* ---------------------------------------------------------------------
+   * Example picker
+   *
+   * The list is built from TM.EXAMPLES, so adding a worked example is a
+   * change to js/examples.js alone. It behaves as a menu rather than as a
+   * setting: after a load it drops back to its label, which also means the
+   * same example can be picked twice to start over.
+   * ------------------------------------------------------------------- */
+  function bindExamplePicker() {
+    var sel = $('exampleSelect');
+    TM.EXAMPLES.forEach(function (ex) {
+      var opt = document.createElement('option');
+      opt.value = ex.id;
+      opt.textContent = ex.label;
+      opt.title = ex.summary;
+      sel.appendChild(opt);
+    });
+
+    sel.addEventListener('change', function () {
+      var ex = TM.example(sel.value);
+      sel.selectedIndex = 0;
+      if (!ex) return;
+      if (!confirm('Replace the current diagram with the ' + ex.label + ' example?\n\n' +
+        'Unsaved work in this diagram will be lost.')) return;
+      setModel(ex.build(), { resetHistory: true, fit: true });
+      status('Loaded the ' + ex.label + ' example.');
+    });
+  }
+
   function bindToolbar() {
     $('modelName').addEventListener('input', function (e) {
       state.model.meta.name = e.target.value;
@@ -168,12 +202,6 @@
       state.diagram.view = { x: 0, y: 0, k: 1 };
       state.diagram.render();
       status('New model.');
-    });
-
-    $('btnSample').addEventListener('click', function () {
-      if (!confirm('Replace the current diagram with the worked example?')) return;
-      setModel(sampleModel(), { resetHistory: true, fit: true });
-      status('Worked example loaded.');
     });
 
     $('btnSave').addEventListener('click', function () {
@@ -1110,7 +1138,14 @@
       '<kbd>Ctrl</kbd>+<kbd>S</kbd> save · arrows nudge, <kbd>Shift</kbd>+arrows nudge by grid.</p>',
       '<h3>Saving</h3>',
       '<p>The diagram is kept in this browser automatically. <b>Save .json</b> writes a portable file you can hand ' +
-      'to students or check into a repository; <b>Open…</b> loads it back.</p>'
+      'to students or check into a repository; <b>Open…</b> loads it back.</p>',
+      '<h3>Worked examples</h3>',
+      '<p>The <b>Examples…</b> picker in the toolbar loads a finished model to read, pull apart and compare ' +
+      'your own work against:</p>',
+      '<ul>' + TM.EXAMPLES.map(function (ex) {
+        return '<li><b>' + escapeHtml(ex.label) + '</b> — ' + escapeHtml(ex.summary) + '</li>';
+      }).join('') + '</ul>',
+      '<p>Loading one replaces what is on the canvas, so save first if you want to keep it.</p>'
     ].join('');
     $('helpModal').hidden = false;
   }
@@ -1181,434 +1216,6 @@
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  /* ---------------------------------------------------------------------
-   * Worked example - a connected infusion pump, deliberately imperfect so the
-   * generated report has something to say in every STRIDE category and in all
-   * three patient-safety classes: device control, alarms and safety stops.
-   * ------------------------------------------------------------------- */
-  function sampleModel() {
-    var m = TM.emptyModel();
-    m.meta = {
-      name: 'Connected infusion pump (worked example)',
-      system: 'Large-volume infusion pump with hospital connectivity and a vendor cloud service',
-      author: 'Teaching example',
-      date: new Date().toISOString().slice(0, 10),
-      intendedUse: 'Continuous and bolus intravenous delivery of medication to adult and paediatric inpatients, ' +
-        'programmed at the bedside or by auto-programming from the EHR, under the supervision of clinical staff.',
-      scope: 'In scope: the pump controller and its dose-limit interlock, the alarm path to the nurse call system, ' +
-        'the hospital gateway, the drug library service and the vendor telemetry cloud. Out of scope: the EHR itself, ' +
-        'hospital network infrastructure, and physical security of the ward.',
-      safetyDoc: 'Infusion Pump Risk Management File (ISO 14971)',
-      safetyDocRef: 'RMF-IP-2200 rev C'
-    };
-
-    function node(type, x, y, w, h, title, description, props, isAsset) {
-      var n = TM.makeNode(type, x + w / 2, y + h / 2);
-      n.w = w; n.h = h; n.x = x; n.y = y;
-      n.title = title;
-      n.description = description || '';
-      n.props = props || {};
-      n.isAsset = !!isAsset;
-      m.nodes.push(n);
-      return n;
-    }
-    function flow(from, to, title, description, props, bidi) {
-      var f = TM.makeFlow(from.id, to.id);
-      f.title = title;
-      f.description = description || '';
-      f.props = props || {};
-      f.bidirectional = !!bidi;
-      m.flows.push(f);
-      return f;
-    }
-
-    /* ---- trust boundaries ---- */
-    node('boundary', 40, 60, 420, 560, 'Pump enclosure (device)',
-      'The physical device: firmware, actuator and local user interface.',
-      { boundaryKind: 'Machine / process boundary' });
-    node('boundary', 500, 60, 400, 560, 'Hospital network',
-      'The clinical network the pump joins over Wi-Fi.',
-      { boundaryKind: 'Network segment' });
-    node('boundary', 940, 60, 340, 560, 'Vendor cloud',
-      'Manufacturer-operated telemetry and fleet management service.',
-      { boundaryKind: 'Third-party or vendor' });
-
-    /* ---- inside the pump ---- */
-    var pumpCtl = node('process', 90, 140, 190, 96, 'Pump controller',
-      'Firmware that computes and drives the infusion rate.', {
-        safetyFunctions: ['control'],
-        harmSeverity: 'Catastrophic — patient death',
-        softwareSafetyClass: 'Class C — death or serious injury possible',
-        safetyFileRef: 'HAZ-001, HAZ-004, RC-011',
-        safetyNotes: 'Over-infusion of a high-alert medication. The controller drives the actuator directly, so any ' +
-          'altered rate or programme becomes delivered therapy within one pump cycle.',
-        exposure: 'Internal network',
-        privilege: 'Elevated service account',
-        inputValidation: 'Partial / deny-list',
-        resilience: 'Timeouts only',
-        authentication: 'Shared secret or API key',
-        authorization: 'Simple ownership check',
-        logging: 'Errors only',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'Critical (safety / life)',
-        owner: 'Device firmware team'
-      }, true);
-
-    var interlock = node('process', 90, 290, 190, 88, 'Dose limit interlock',
-      'Independent hard-limit check before actuation.', {
-        safetyFunctions: ['safetyStop'],
-        harmSeverity: 'Catastrophic — patient death',
-        softwareSafetyClass: 'Class C — death or serious injury possible',
-        safetyFileRef: 'RC-011, RC-012',
-        safetyNotes: 'This is the last barrier between a wrong programmed dose and the patient. If its limits are ' +
-          'widened, or it does not get to run, nothing else stops an unsafe infusion.',
-        exposure: 'Internal network',
-        privilege: 'Least privilege',
-        inputValidation: 'Partial / deny-list',
-        resilience: 'None',
-        authentication: 'None / anonymous',
-        authorization: 'Shared credential for everyone',
-        logging: 'None',
-        dataClassification: 'Internal',
-        criticality: 'Critical (safety / life)',
-        owner: 'Device firmware team'
-      }, true);
-
-    var alarmMgr = node('process', 90, 430, 190, 88, 'Alarm manager',
-      'Detects alarm conditions and annunciates locally and remotely.', {
-        safetyFunctions: ['alarm'],
-        harmSeverity: 'Critical — permanent impairment or life-threatening injury',
-        softwareSafetyClass: 'Class C — death or serious injury possible',
-        safetyFileRef: 'HAZ-007',
-        safetyNotes: 'Occlusion, air-in-line and infusion-complete alarms. A suppressed alarm means deterioration ' +
-          'goes unnoticed; injected false alarms cause alarm fatigue on the ward.',
-        exposure: 'Internal network',
-        privilege: 'Least privilege',
-        inputValidation: 'None',
-        resilience: 'None',
-        authentication: 'None / anonymous',
-        authorization: 'None',
-        logging: 'Errors only',
-        dataClassification: 'Confidential',
-        criticality: 'Critical (safety / life)',
-        owner: 'Device firmware team'
-      });
-
-    var drugLib = node('datastore', 90, 540, 190, 66, 'Drug library (on device)',
-      'Dose limits and concentrations per medication.', {
-        safetyFunctions: ['safetyStop'],
-        harmSeverity: 'Catastrophic — patient death',
-        softwareSafetyClass: 'Class C — death or serious injury possible',
-        safetyFileRef: 'RC-012',
-        safetyNotes: 'The limits the interlock enforces. Tampering here silently widens what the pump will accept ' +
-          'as a legitimate dose.',
-        storeKind: 'File share',
-        encryptionAtRest: 'None',
-        integrity: 'None',
-        backup: 'Tested backups with retention',
-        authentication: 'Shared secret or API key',
-        authorization: 'Shared credential for everyone',
-        logging: 'None',
-        dataClassification: 'Internal',
-        criticality: 'Critical (safety / life)',
-        owner: 'Pharmacy informatics'
-      }, true);
-
-    /* ---- clinical users ---- */
-    var nurse = node('entity', 540, 140, 170, 74, 'Nurse (bedside)',
-      'Programmes the infusion at the pump and responds to alarms.', {
-        safetyFunctions: ['control', 'careDelivery'],
-        harmSeverity: 'Serious — injury needing professional intervention',
-        safetyFileRef: 'HAZ-002',
-        safetyNotes: 'Use error and spoofed identity both end in a wrong programme reaching the pump.',
-        entityKind: 'Human user',
-        trustLevel: 'Semi-trusted (authenticated)',
-        authentication: 'Username + password',
-        logging: 'Errors only',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'High',
-        owner: 'Clinical engineering'
-      });
-
-    var biomed = node('entity', 540, 250, 170, 74, 'Biomed / service tech',
-      'Services the pump and updates the drug library.', {
-        safetyFunctions: ['safetyStop'],
-        harmSeverity: 'Catastrophic — patient death',
-        safetyFileRef: 'HAZ-009',
-        safetyNotes: 'Holds the credentials that can change dose limits and disable interlocks.',
-        entityKind: 'Privileged user / administrator',
-        trustLevel: 'Semi-trusted (authenticated)',
-        authentication: 'Shared secret or API key',
-        logging: 'None',
-        dataClassification: 'Internal',
-        criticality: 'High',
-        owner: 'Clinical engineering'
-      });
-
-    /* ---- hospital network ---- */
-    var gateway = node('process', 540, 370, 190, 92, 'Hospital gateway',
-      'Bridges pumps to hospital systems and the vendor cloud.', {
-        safetyFunctions: ['control', 'alarm', 'careDelivery'],
-        harmSeverity: 'Critical — permanent impairment or life-threatening injury',
-        softwareSafetyClass: 'Class B — non-serious injury possible',
-        safetyFileRef: 'HAZ-004, HAZ-007',
-        safetyNotes: 'Carries auto-programming orders towards the pump and alarms away from it. A compromise here ' +
-          'reaches every pump on the ward at once.',
-        exposure: 'Internal network',
-        privilege: 'Elevated service account',
-        inputValidation: 'None',
-        resilience: 'None',
-        authentication: 'None / anonymous',
-        authorization: 'None',
-        logging: 'Errors only',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'Critical (safety / life)',
-        owner: 'Hospital IT'
-      });
-
-    var nurseCall = node('process', 540, 500, 190, 88, 'Nurse call system',
-      'Escalates device alarms to staff handsets.', {
-        safetyFunctions: ['alarm', 'careDelivery'],
-        harmSeverity: 'Critical — permanent impairment or life-threatening injury',
-        softwareSafetyClass: 'Class B — non-serious injury possible',
-        safetyFileRef: 'HAZ-007, RC-021',
-        safetyNotes: 'The remote half of the alarm path. If alarms are delayed or lost here, the bedside alarm is ' +
-          'the only remaining barrier.',
-        exposure: 'Internal network',
-        privilege: 'Least privilege',
-        inputValidation: 'Partial / deny-list',
-        resilience: 'Timeouts only',
-        authentication: 'Shared secret or API key',
-        authorization: 'Role-based (RBAC)',
-        logging: 'Security events logged',
-        dataClassification: 'Confidential',
-        criticality: 'Critical (safety / life)',
-        owner: 'Hospital IT'
-      });
-
-    /* ---- vendor cloud ---- */
-    var cloud = node('process', 980, 190, 190, 92, 'Vendor fleet service',
-      'Telemetry, drug library distribution and firmware updates.', {
-        safetyFunctions: ['safetyStop', 'control'],
-        harmSeverity: 'Catastrophic — patient death',
-        softwareSafetyClass: 'Class C — death or serious injury possible',
-        safetyFileRef: 'HAZ-011',
-        safetyNotes: 'Distributes the drug library and firmware to the whole fleet. A compromise is a fleet-wide ' +
-          'safety event, not a single-device one.',
-        exposure: 'Internet-facing',
-        privilege: 'Elevated service account',
-        inputValidation: 'Partial / deny-list',
-        resilience: 'Rate limiting / quotas',
-        authentication: 'Session token / JWT',
-        authorization: 'Role-based (RBAC)',
-        logging: 'Security events logged',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'High',
-        owner: 'Vendor cloud team'
-      });
-
-    var telemetry = node('datastore', 980, 350, 190, 66, 'Telemetry & event store',
-      'Infusion events, alarms and device logs.', {
-        safetyFunctions: ['clinicalData'],
-        harmSeverity: 'Minor — temporary injury, no professional intervention',
-        softwareSafetyClass: 'Class A — no injury possible',
-        safetyFileRef: 'HAZ-013',
-        storeKind: 'Object / blob storage',
-        encryptionAtRest: 'Full-disk / volume',
-        integrity: 'None',
-        backup: 'Backups, never tested',
-        authentication: 'Session token / JWT',
-        authorization: 'Role-based (RBAC)',
-        logging: 'Errors only',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'Medium',
-        owner: 'Vendor cloud team'
-      });
-
-    var patient = node('asset', 990, 480, 100, 86, 'Patient',
-      '', {
-        safetyFunctions: ['control', 'careDelivery'],
-        harmSeverity: 'Catastrophic — patient death',
-        safetyFileRef: 'RMF-IP-2200',
-        safetyNotes: 'The asset every other control exists to protect.',
-        assetKind: 'Physical',
-        dataClassification: 'Restricted (PII / PHI / PCI)',
-        criticality: 'Critical (safety / life)',
-        owner: 'Clinical service'
-      }, true);
-    void patient;
-
-    /* ---- flows ---- */
-    flow(nurse, pumpCtl, 'Programme infusion', 'Rate, dose and duration entered at the bedside.', {
-      safetyFunctions: ['control'],
-      harmSeverity: 'Catastrophic — patient death',
-      softwareSafetyClass: 'Class C — death or serious injury possible',
-      safetyFileRef: 'HAZ-002',
-      protocol: 'Other',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'Username + password',
-      authorization: 'Simple ownership check',
-      logging: 'Errors only',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'Critical (safety / life)'
-    });
-
-    flow(gateway, pumpCtl, 'Auto-programming order', 'Pharmacy order pushed to the pump from the EHR.', {
-      safetyFunctions: ['control'],
-      harmSeverity: 'Catastrophic — patient death',
-      softwareSafetyClass: 'Class C — death or serious injury possible',
-      safetyFileRef: 'HAZ-004',
-      protocol: 'HTTP (cleartext)',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'None / anonymous',
-      authorization: 'None',
-      logging: 'None',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'Critical (safety / life)'
-    });
-
-    flow(pumpCtl, interlock, 'Requested rate check', 'Every programmed rate is checked against the hard limits.', {
-      safetyFunctions: ['safetyStop'],
-      harmSeverity: 'Catastrophic — patient death',
-      safetyFileRef: 'RC-011',
-      protocol: 'Other',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'None / anonymous',
-      authorization: 'None',
-      logging: 'None',
-      dataClassification: 'Internal',
-      criticality: 'Critical (safety / life)'
-    }, true);
-
-    flow(drugLib, interlock, 'Dose limits', 'Limits the interlock enforces.', {
-      safetyFunctions: ['safetyStop'],
-      harmSeverity: 'Catastrophic — patient death',
-      safetyFileRef: 'RC-012',
-      protocol: 'Other',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'Timeouts only',
-      authentication: 'None / anonymous',
-      authorization: 'None',
-      logging: 'None',
-      dataClassification: 'Internal',
-      criticality: 'Critical (safety / life)'
-    });
-
-    flow(pumpCtl, alarmMgr, 'Alarm conditions', 'Occlusion, air-in-line, battery and completion events.', {
-      safetyFunctions: ['alarm'],
-      harmSeverity: 'Critical — permanent impairment or life-threatening injury',
-      safetyFileRef: 'HAZ-007',
-      protocol: 'Other',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'None / anonymous',
-      authorization: 'None',
-      logging: 'Errors only',
-      dataClassification: 'Confidential',
-      criticality: 'Critical (safety / life)'
-    });
-
-    flow(alarmMgr, nurseCall, 'Remote alarm escalation', 'Alarms forwarded to staff handsets.', {
-      safetyFunctions: ['alarm'],
-      harmSeverity: 'Critical — permanent impairment or life-threatening injury',
-      safetyFileRef: 'HAZ-007, RC-021',
-      protocol: 'HTTP (cleartext)',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'Shared secret or API key',
-      authorization: 'None',
-      logging: 'Errors only',
-      dataClassification: 'Confidential',
-      criticality: 'Critical (safety / life)'
-    });
-
-    flow(biomed, drugLib, 'Drug library update', 'Service tooling writes new dose limits to the pump.', {
-      safetyFunctions: ['safetyStop'],
-      harmSeverity: 'Catastrophic — patient death',
-      safetyFileRef: 'HAZ-009',
-      protocol: 'SMB / NFS file share',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'None',
-      authentication: 'Shared secret or API key',
-      authorization: 'Shared credential for everyone',
-      logging: 'None',
-      dataClassification: 'Internal',
-      criticality: 'High'
-    });
-
-    flow(cloud, gateway, 'Drug library & firmware distribution', 'Fleet-wide updates pushed to the hospital.', {
-      safetyFunctions: ['safetyStop', 'control'],
-      harmSeverity: 'Catastrophic — patient death',
-      softwareSafetyClass: 'Class C — death or serious injury possible',
-      safetyFileRef: 'HAZ-011',
-      protocol: 'HTTPS / TLS',
-      encryptionInTransit: 'TLS (server authenticated)',
-      flowIntegrity: 'Transport (TLS) only',
-      throttling: 'Timeouts only',
-      authentication: 'Shared secret or API key',
-      authorization: 'Shared credential for everyone',
-      logging: 'Security events logged',
-      dataClassification: 'Internal',
-      criticality: 'High'
-    });
-
-    flow(gateway, cloud, 'Device telemetry', 'Infusion and alarm events sent to the vendor.', {
-      safetyFunctions: ['clinicalData'],
-      harmSeverity: 'Minor — temporary injury, no professional intervention',
-      safetyFileRef: 'HAZ-013',
-      protocol: 'HTTPS / TLS',
-      encryptionInTransit: 'TLS (server authenticated)',
-      flowIntegrity: 'Transport (TLS) only',
-      throttling: 'Timeouts only',
-      authentication: 'Shared secret or API key',
-      authorization: 'Role-based (RBAC)',
-      logging: 'Errors only',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'Medium'
-    });
-
-    flow(cloud, telemetry, 'Store events', 'Telemetry written to the event store.', {
-      protocol: 'HTTPS / TLS',
-      encryptionInTransit: 'TLS (server authenticated)',
-      flowIntegrity: 'Transport (TLS) only',
-      throttling: 'Rate limited / throttled',
-      authentication: 'Session token / JWT',
-      authorization: 'Role-based (RBAC)',
-      logging: 'Errors only',
-      dataClassification: 'Restricted (PII / PHI / PCI)',
-      criticality: 'Medium'
-    });
-
-    flow(alarmMgr, nurse, 'Bedside annunciation', 'Audible and visual alarm at the pump.', {
-      safetyFunctions: ['alarm'],
-      harmSeverity: 'Critical — permanent impairment or life-threatening injury',
-      safetyFileRef: 'RC-021',
-      protocol: 'Physical / manual transfer',
-      encryptionInTransit: 'None (cleartext)',
-      flowIntegrity: 'None',
-      throttling: 'Timeouts only',
-      authentication: 'None / anonymous',
-      authorization: 'None',
-      logging: 'None',
-      dataClassification: 'Confidential',
-      criticality: 'Critical (safety / life)'
-    });
-
-    return m;
-  }
-
-
-  TM.sampleModel = sampleModel;
   TM.app = state;   /* exposed for debugging and for automated checks */
 
   if (document.readyState === 'loading') {

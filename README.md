@@ -23,13 +23,15 @@ Or serve it (handy for a classroom on one machine):
 npx http-server -p 8080 .
 ```
 
-The tool starts with a **worked example** — a connected infusion pump, deliberately
-imperfect, so the first report a student sees has something to say in every STRIDE category
-and in all three patient-safety classes. `examples/` also holds a patient-portal model for
-the plain healthcare-IT case, and a **CGM lab** model (`examples/cgm-lab.json`) that threat
-models the deliberately vulnerable [CGM-LAB-INT](https://github.com/aaron-securemed-services/CGM-LAB-INT)
-target — the GlucoSense CGM-3000 — so students have a finished reference to compare their own
-against when they threat model the same system.
+The **Examples…** picker in the toolbar loads a finished threat model to read, pull apart
+and compare your own work against. There are two:
+
+| Example | What it is |
+| --- | --- |
+| **Connected infusion pump** | A large-volume infusion pump with hospital connectivity and a vendor cloud. Deliberately imperfect, so its report has something to say in every STRIDE category and in all three patient-safety classes: device control, alarms and a dose-limit safety stop. Loaded when the tool first opens. |
+| **CGM lab — GlucoSense CGM-3000** | The deliberately vulnerable [CGM-LAB-INT](https://github.com/aaron-securemed-services/CGM-LAB-INT) target, threat modelled the way students are asked to model it: BLE sensor, MQTT telemetry, HL7 interface, web and bedside-kiosk console, the host privilege model, and the Raspberry Pi's own USB ports, Bluetooth radio and touchscreen. |
+
+Loading an example replaces what is on the canvas, so save first if you want to keep it.
 
 ---
 
@@ -256,10 +258,10 @@ legend to an image. The grid and selection handles are never included.
 ### 6. Save
 
 The diagram is autosaved to browser storage. **Save .json** writes a portable file to hand
-to students or commit to a repository; **Open…** loads it back. `examples/patient-portal.json`
-and `examples/cgm-lab.json` are worked examples — open either to see a completed model, its
-report and its safety traceability CSV (the `*-stride-report.md` and `*-safety-traceability.csv`
-files next to them were generated straight from the model).
+to students or commit to a repository; **Open…** loads it back. Both worked examples are also
+saved files in `examples/` — `infusion-pump.json` and `cgm-lab.json` — next to the reports and
+safety traceability CSVs generated straight from them (`*-stride-report.md`,
+`*-safety-traceability.csv`).
 
 ---
 
@@ -310,8 +312,8 @@ worth saying out loud in class.
 
 A workable 90-minute session:
 
-1. **Legend first (10 min).** Open the example, walk the six shapes, toggle the legend on
-   the diagram.
+1. **Legend first (10 min).** Open an example from the toolbar picker, walk the six shapes,
+   toggle the legend on the diagram.
 2. **Draw together (20 min).** Build a diagram of a device the group knows. Insist on
    descriptions — "what does this actually do?" surfaces more than the shapes do.
 3. **Boundaries (10 min).** Add trust boundaries and watch which flows go dashed. Ask
@@ -352,7 +354,8 @@ js/model.js           data model, the category catalogue, save/load, undo histor
 js/stride.js          STRIDE knowledge base, security + patient-safety rules, analysis engine
 js/diagram.js         SVG canvas: shapes, direct manipulation, SVG/PNG export
 js/report.js          HTML / Markdown / CSV report generation
-js/app.js             UI wiring, properties panel, file IO, worked example
+js/examples.js        the worked examples the toolbar picker offers
+js/app.js             UI wiring, properties panel, file IO, the example picker
 examples/             saved threat models, a scoring profile, and generated reports
 ```
 
@@ -396,6 +399,24 @@ they apply to, plus the clinical harm they produce:
 
 Adding a safety function to `TM.SAFETY_FUNCTIONS` in `js/model.js` extends the properties
 panel, the diagram badge, the report summary and the traceability matrix at once.
+
+### Adding a worked example
+
+Examples live in `js/examples.js` and register themselves:
+
+```js
+register('cgm-lab', 'CGM lab — GlucoSense CGM-3000', 'One line for the picker and the help…',
+  cgmLabModel);
+```
+
+The builder returns a fresh model each time it is called — either built element by element
+with `TM.makeNode` / `TM.makeFlow`, as the infusion pump is, or parsed from a saved model
+held as data in the file, as the CGM lab is. The picker in the toolbar and the list in the
+help are generated from the registry, so registering is the only wiring needed.
+
+The CGM lab is kept in two places on purpose: as data in `js/examples.js` so the picker
+works from `file://` with no server, and as `examples/cgm-lab.json` so it can be opened,
+saved and diffed as a file. Change one and change the other.
 
 ## Standards this lines up with
 

@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "meta": {
     "name": "CGM lab — GlucoSense CGM-3000 (worked example)",
-    "system": "Continuous glucose monitoring appliance: a wearable BLE sensor, an MQTT telemetry backbone, an HL7 clinical interface, and a web + bedside-kiosk console, all on one Raspberry Pi.",
+    "system": "Continuous glucose monitoring appliance: a wearable BLE sensor, an MQTT telemetry backbone, an HL7 clinical interface, and a web + bedside-kiosk console, all on one Raspberry Pi with its USB ports, Bluetooth radio and touchscreen live at the bedside.",
     "author": "SecureMED teaching example (CGM-LAB-INT)",
     "date": "2026-08-29",
     "intendedUse": "A continuous glucose monitor tracks a patient's interstitial glucose every few minutes and streams it to a display and to the clinical record. Patients and clinicians rely on it for two things: hypo/hyper ALARMS that warn of a dangerous low or high, and the glucose trend used to decide insulin dosing (including automated-delivery loops). A missed low-glucose alarm or a falsely reassuring reading can lead to severe, un-treated hypoglycaemia — seizure, coma or death. This lab is a deliberately vulnerable simulation (GlucoSense CGM-3000) that teaches students to find and fix the flaws that would let an attacker read, forge or suppress that safety-critical data.",
-    "scope": "In scope: the appliance's web/kiosk console, HL7 listener, MQTT broker and telemetry, BLE advertiser, on-device config and user store, and the host privilege model. Out of scope: the physical sensor hardware and adhesive, the upstream hospital EHR/LIS itself, the lab network fabric, and any real patient.",
+    "scope": "In scope: the appliance's web/kiosk console, HL7 listener, MQTT broker and telemetry, BLE advertiser, on-device config and user store, the host privilege model, and the Pi's physical interfaces — USB host ports, the on-board Bluetooth controller and the bedside touchscreen panel. Out of scope: the physical sensor hardware and adhesive, the upstream hospital EHR/LIS itself, the lab network fabric, and any real patient.",
     "safetyDoc": "CGM-3000 Risk Management File (ISO 14971)",
     "safetyDocRef": "RMF-CGM-3000 rev A"
   },
@@ -32,9 +32,9 @@
       "x": 440,
       "y": 40,
       "w": 900,
-      "h": 560,
+      "h": 800,
       "title": "GlucoSense CGM-3000 appliance (Raspberry Pi 5)",
-      "description": "The device under test. All lab services bind 0.0.0.0 with no host firewall.",
+      "description": "The device under test. All lab services bind 0.0.0.0 with no host firewall, and its physical interfaces — USB ports, Bluetooth radio and touch panel — are live at the bedside.",
       "isAsset": false,
       "existingControls": "",
       "props": {
@@ -45,7 +45,7 @@
       "id": "boundary-cgm-host",
       "type": "boundary",
       "x": 440,
-      "y": 630,
+      "y": 900,
       "w": 560,
       "h": 150,
       "title": "Host OS / root (SSH)",
@@ -286,7 +286,7 @@
       "id": "process-host",
       "type": "process",
       "x": 500,
-      "y": 655,
+      "y": 925,
       "w": 190,
       "h": 90,
       "title": "Host shell (biomed via SSH)",
@@ -390,7 +390,7 @@
       "id": "datastore-root",
       "type": "datastore",
       "x": 760,
-      "y": 662,
+      "y": 932,
       "w": 200,
       "h": 80,
       "title": "Root filesystem / sudoers (/etc/sudoers.d, /root)",
@@ -496,6 +496,138 @@
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "High",
         "owner": "Platform team"
+      }
+    },
+    {
+      "id": "boundary-cgm-bedside",
+      "type": "boundary",
+      "x": 1060,
+      "y": 900,
+      "w": 340,
+      "h": 180,
+      "title": "Unattended bedside (physical access)",
+      "description": "The patient bay itself. Anyone who can walk up to the appliance can touch its screen, plug into its ports and stand inside Bluetooth range, usually unobserved.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "boundaryKind": "Physical / facility"
+      }
+    },
+    {
+      "id": "entity-physical",
+      "type": "entity",
+      "x": 1130,
+      "y": 955,
+      "w": 160,
+      "h": 70,
+      "title": "Visitor at the bedside",
+      "description": "A visitor, a patient, a cleaner or a contractor: unauthenticated, unsupervised, and alone with the device for minutes at a time.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "entityKind": "Human user",
+        "trustLevel": "Untrusted (anonymous)",
+        "authentication": "None / anonymous",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Low"
+      }
+    },
+    {
+      "id": "process-usb",
+      "type": "process",
+      "x": 500,
+      "y": 660,
+      "w": 190,
+      "h": 92,
+      "title": "USB host ports (udev auto-mount)",
+      "description": "The Pi's four USB-A ports, live and unblanked at the bedside. udev auto-mounts any removable volume and the kernel binds any device that enumerates as a keyboard. Physical surface — not one of the numbered lab surfaces.",
+      "isAsset": false,
+      "existingControls": "The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.",
+      "props": {
+        "exposure": "Internal network",
+        "privilege": "Root / administrator",
+        "inputValidation": "None",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium",
+        "owner": "Platform team",
+        "safetyFunctions": [
+          "alarm",
+          "careDelivery"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "SEC-HAZ-010",
+        "safetyNotes": "A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack."
+      }
+    },
+    {
+      "id": "process-bt",
+      "type": "process",
+      "x": 760,
+      "y": 660,
+      "w": 200,
+      "h": 92,
+      "title": "Bluetooth stack (BlueZ / bluetoothd, root)",
+      "description": "The Pi's on-board controller and the BlueZ daemon: discoverable and pairable in the lab image, and the same radio the BLE advertiser broadcasts on. Physical / RF surface — not one of the numbered lab surfaces.",
+      "isAsset": false,
+      "existingControls": "Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.",
+      "props": {
+        "exposure": "Internal network",
+        "privilege": "Root / administrator",
+        "inputValidation": "None",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium",
+        "owner": "Firmware team",
+        "safetyFunctions": [
+          "clinicalData",
+          "alarm"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "SEC-HAZ-011",
+        "safetyNotes": "A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates."
+      }
+    },
+    {
+      "id": "process-touch",
+      "type": "process",
+      "x": 1040,
+      "y": 660,
+      "w": 200,
+      "h": 92,
+      "title": "Touchscreen HMI (DSI panel + libinput)",
+      "description": "The 7-inch bedside touch panel: the only thing the clinician actually looks at, and the input device for the kiosk session on tty1. Physical surface — not one of the numbered lab surfaces.",
+      "isAsset": false,
+      "existingControls": "None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.",
+      "props": {
+        "exposure": "Internal network",
+        "privilege": "Least privilege",
+        "inputValidation": "None",
+        "resilience": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "owner": "Device web team",
+        "safetyFunctions": [
+          "alarm",
+          "clinicalData",
+          "careDelivery"
+        ],
+        "harmSeverity": "Serious — injury needing professional intervention",
+        "softwareSafetyClass": "Class B — non-serious injury possible",
+        "safetyFileRef": "SEC-HAZ-012",
+        "safetyNotes": "This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay."
       }
     }
   ],
@@ -868,6 +1000,225 @@
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "High"
+      }
+    },
+    {
+      "id": "flow-phys-usb",
+      "type": "flow",
+      "from": "entity-physical",
+      "to": "process-usb",
+      "bidirectional": true,
+      "title": "USB port access",
+      "description": "BadUSB keystroke injection, auto-mounted mass storage, a bootable stick, and imaging the SD card off the device.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-phys-bt",
+      "type": "flow",
+      "from": "entity-physical",
+      "to": "process-bt",
+      "bidirectional": true,
+      "title": "Bluetooth pairing / GATT access",
+      "description": "Just Works pairing of an HID keyboard, GATT enumeration of the advertiser, and RF flooding of the controller — all from outside the bay.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-phys-touch",
+      "type": "flow",
+      "from": "entity-physical",
+      "to": "process-touch",
+      "bidirectional": true,
+      "title": "Unattended panel use",
+      "description": "Anyone in the bay can read the panel and drive it: kiosk PIN guessing, gesture escape to the browser, on-screen keyboard.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-touch-kiosk",
+      "type": "flow",
+      "from": "process-touch",
+      "to": "process-kiosk",
+      "bidirectional": true,
+      "title": "Touch input / rendered display",
+      "description": "Touch events into the kiosk session on tty1, and the glucose trend and alarm view rendered back to the panel.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "safetyFunctions": [
+          "alarm",
+          "clinicalData"
+        ],
+        "harmSeverity": "Serious — injury needing professional intervention",
+        "softwareSafetyClass": "Class B — non-serious injury possible",
+        "safetyFileRef": "SEC-HAZ-012"
+      }
+    },
+    {
+      "id": "flow-touch-clin",
+      "type": "flow",
+      "from": "process-touch",
+      "to": "entity-clinician",
+      "bidirectional": false,
+      "title": "Bedside annunciation",
+      "description": "What the clinician actually sees and hears at the bedside: current glucose, trend, and the hypo / hyper alarm.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Critical (safety / life)",
+        "safetyFunctions": [
+          "alarm",
+          "clinicalData"
+        ],
+        "harmSeverity": "Critical — permanent impairment or life-threatening injury",
+        "softwareSafetyClass": "Class B — non-serious injury possible",
+        "safetyFileRef": "SEC-HAZ-012"
+      }
+    },
+    {
+      "id": "flow-bt-kiosk",
+      "type": "flow",
+      "from": "process-bt",
+      "to": "process-kiosk",
+      "bidirectional": false,
+      "title": "Paired HID input",
+      "description": "A Bluetooth keyboard paired from outside the bay types into the kiosk session exactly as the bedside user would.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "High",
+        "safetyFunctions": [
+          "alarm",
+          "careDelivery"
+        ],
+        "harmSeverity": "Serious — injury needing professional intervention",
+        "softwareSafetyClass": "Class B — non-serious injury possible",
+        "safetyFileRef": "SEC-HAZ-011"
+      }
+    },
+    {
+      "id": "flow-usb-conf",
+      "type": "flow",
+      "from": "process-usb",
+      "to": "datastore-conf",
+      "bidirectional": true,
+      "title": "Removable-media config copy",
+      "description": "Diagnostic dumps written to a USB stick and config restored from one — the device serial and the MQTT credentials travel with them.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-usb-root",
+      "type": "flow",
+      "from": "process-usb",
+      "to": "datastore-root",
+      "bidirectional": false,
+      "title": "Auto-mount + udev rule execution",
+      "description": "Mount helpers and udev rules run as root the moment a device enumerates, so removable media reaches the root filesystem without anyone logging in.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Physical / manual transfer",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Medium"
+      }
+    },
+    {
+      "id": "flow-ble-bt",
+      "type": "flow",
+      "from": "process-ble",
+      "to": "process-bt",
+      "bidirectional": false,
+      "title": "HCI advertising control",
+      "description": "The advertiser drives the same controller through BlueZ, so whoever owns bluetoothd owns what the device broadcasts.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "protocol": "Other",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "None / anonymous",
+        "authorization": "None",
+        "logging": "None",
+        "dataClassification": "Restricted (PII / PHI / PCI)",
+        "criticality": "Low"
       }
     }
   ],
