@@ -26,7 +26,10 @@ npx http-server -p 8080 .
 The tool starts with a **worked example** — a connected infusion pump, deliberately
 imperfect, so the first report a student sees has something to say in every STRIDE category
 and in all three patient-safety classes. `examples/` also holds a patient-portal model for
-the plain healthcare-IT case.
+the plain healthcare-IT case, and a **CGM lab** model (`examples/cgm-lab.json`) that threat
+models the deliberately vulnerable [CGM-LAB-INT](https://github.com/aaron-securemed-services/CGM-LAB-INT)
+target — the GlucoSense CGM-3000 — so students have a finished reference to compare their own
+against when they threat model the same system.
 
 ---
 
@@ -254,7 +257,9 @@ legend to an image. The grid and selection handles are never included.
 
 The diagram is autosaved to browser storage. **Save .json** writes a portable file to hand
 to students or commit to a repository; **Open…** loads it back. `examples/patient-portal.json`
-is the worked example.
+and `examples/cgm-lab.json` are worked examples — open either to see a completed model, its
+report and its safety traceability CSV (the `*-stride-report.md` and `*-safety-traceability.csv`
+files next to them were generated straight from the model).
 
 ---
 
