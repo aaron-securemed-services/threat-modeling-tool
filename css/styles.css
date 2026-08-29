@@ -16,7 +16,7 @@
   --warn: #b26a00;
   --ok: #227544;
   --radius: 6px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -29,7 +29,38 @@ html, body {
   font-size: 14px;
   color: var(--ink);
   background: var(--bg);
+  /* Gecko renders a touch heavier than WebKit by default; match them up. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Checkboxes and focus rings pick up the app accent instead of each
+   browser's own blue. */
+:root { accent-color: var(--accent); }
+
+/* Firefox shows a permanent gutter scrollbar where WebKit uses an overlay;
+   make both thin and unobtrusive. */
+.palette, .props, .modal-content, .props textarea, .field textarea {
+  scrollbar-width: thin;
+  scrollbar-color: #c3cbd9 transparent;
+}
+.palette::-webkit-scrollbar,
+.props::-webkit-scrollbar,
+.modal-content::-webkit-scrollbar { width: 10px; height: 10px; }
+.palette::-webkit-scrollbar-thumb,
+.props::-webkit-scrollbar-thumb,
+.modal-content::-webkit-scrollbar-thumb {
+  background: #c3cbd9;
+  border: 3px solid #fff;
+  border-radius: 10px;
+}
+.palette::-webkit-scrollbar-track,
+.props::-webkit-scrollbar-track,
+.modal-content::-webkit-scrollbar-track { background: transparent; }
+
+/* Gecko draws its own inner border and dotted focus ring on buttons. */
+button::-moz-focus-inner { border: 0; padding: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ------------------------------- app bar --------------------------------- */
 .app-bar {
@@ -48,10 +79,18 @@ html, body {
   max-width: 460px;
   padding: 6px 9px;
   font: inherit;
+  line-height: 1.35;
   color: inherit;
   background: #f7f9fc;
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.model-name input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(45, 108, 223, .18);
 }
 .app-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
@@ -60,6 +99,7 @@ html, body {
   padding: 6px 11px;
   font: inherit;
   font-size: 13px;
+  line-height: 1.35;
   color: var(--ink);
   background: #f4f6fa;
   border: 1px solid var(--line);
@@ -183,11 +223,34 @@ html, body {
   padding: 6px 8px;
   font: inherit;
   font-size: 13px;
+  line-height: 1.35;
   color: inherit;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  /* Draw our own control rather than inheriting each engine's native widget:
+     Safari renders a rounded native select, Gecko a flat one with different
+     metrics, so without this the panel looks like two different apps. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
+.field select {
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235b6478' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  text-overflow: ellipsis;
+}
+.field select:hover { border-color: #b9cbee; }
+.field input[type=text]:focus, .field textarea:focus, .field select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(45, 108, 223, .18);
+}
+/* Gecko dims the text of a select whose value is the placeholder-ish first
+   option; keep every control the same colour. */
+.field select:-moz-focusring { color: inherit; text-shadow: none; }
 .field textarea { resize: vertical; min-height: 62px; line-height: 1.4; }
 .field .field-help { font-size: 11px; color: var(--ink-soft); margin-top: 3px; line-height: 1.35; }
 .field-row { display: flex; gap: 8px; }

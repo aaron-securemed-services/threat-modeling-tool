@@ -12,7 +12,7 @@ window.TM = window.TM || {};
   'use strict';
 
   var NS = 'http://www.w3.org/2000/svg';
-  var FONT = 'Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif';
+  var FONT = 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif';
   var INK = '#1f2430';
   var MUTED = '#5b6478';
   var BOUNDARY_RED = '#e23b3b';
@@ -343,7 +343,7 @@ window.TM = window.TM || {};
     if (letters) {
       g.appendChild(text(letters, {
         x: x + 15, y: y + 12.5, 'font-family': FONT, 'font-size': 10.5,
-        'font-weight': 700, fill: '#ffffff', 'letter-spacing': '0.5'
+        'font-weight': 700, fill: '#ffffff', 'letter-spacing': '0.5px'
       }));
     }
   }

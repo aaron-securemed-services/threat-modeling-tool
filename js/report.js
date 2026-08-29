@@ -514,7 +514,8 @@ window.TM = window.TM || {};
   /** Minimal print-friendly stylesheet used by the downloadable report. */
   TM.REPORT_CSS = [
     'body{margin:0;padding:32px;background:#fff;color:#1f2430;',
-    'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.55}',
+    'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;',
+    'font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}',
     '.report{max-width:960px;margin:0 auto}',
     'h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:26px 0 8px;padding-bottom:4px;border-bottom:1px solid #d3d9e4}',
     'h3{font-size:14px;margin:18px 0 6px}',
