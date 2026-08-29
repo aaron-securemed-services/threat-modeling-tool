@@ -153,6 +153,48 @@ button::-moz-focus-inner { border: 0; padding: 0; }
 .btn-danger { color: var(--danger); border-color: #f0c4c4; background: #fdf3f3; }
 .btn-danger:hover { background: #fbe7e7; }
 
+/* The example picker. Drawn like a button rather than left to the browser:
+   Safari, Gecko and Blink each render a native select at a different height,
+   and the app bar only lines up if we own the control. */
+.select-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  max-width: 220px;
+  padding: 6px 26px 6px 11px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink);
+  background-color: #f4f6fa;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235b6478' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.select-btn:hover { background-color: #e8edf7; }
+.select-btn:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(45, 108, 223, .18);
+}
+/* Gecko dims the text of a select sitting on its first option. */
+.select-btn:-moz-focusring { color: inherit; text-shadow: none; }
+
+/* Present to screen readers, not on screen. */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 /* -------------------------------- layout --------------------------------- */
 .layout {
   display: grid;

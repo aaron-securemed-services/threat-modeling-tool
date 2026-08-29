@@ -1,47 +1,47 @@
 # CGM lab — GlucoSense CGM-3000 (worked example)
 
-STRIDE threat model report — generated 2026-08-29 21:38
+STRIDE threat model report — generated 2026-08-29 22:40
 
-- **System:** Continuous glucose monitoring appliance: a wearable BLE sensor, an MQTT telemetry backbone, an HL7 clinical interface, and a web + bedside-kiosk console, all on one Raspberry Pi.
+- **System:** Continuous glucose monitoring appliance: a wearable BLE sensor, an MQTT telemetry backbone, an HL7 clinical interface, and a web + bedside-kiosk console, all on one Raspberry Pi with its USB ports, Bluetooth radio and touchscreen live at the bedside.
 - **Author:** SecureMED teaching example (CGM-LAB-INT)
 - **Date:** 2026-08-29
-- **Scope / assumptions:** In scope: the appliance's web/kiosk console, HL7 listener, MQTT broker and telemetry, BLE advertiser, on-device config and user store, and the host privilege model. Out of scope: the physical sensor hardware and adhesive, the upstream hospital EHR/LIS itself, the lab network fabric, and any real patient.
+- **Scope / assumptions:** In scope: the appliance's web/kiosk console, HL7 listener, MQTT broker and telemetry, BLE advertiser, on-device config and user store, the host privilege model, and the Pi's physical interfaces — USB host ports, the on-board Bluetooth controller and the bedside touchscreen panel. Out of scope: the physical sensor hardware and adhesive, the upstream hospital EHR/LIS itself, the lab network fabric, and any real patient.
 - **Intended use:** A continuous glucose monitor tracks a patient's interstitial glucose every few minutes and streams it to a display and to the clinical record. Patients and clinicians rely on it for two things: hypo/hyper ALARMS that warn of a dangerous low or high, and the glucose trend used to decide insulin dosing (including automated-delivery loops). A missed low-glucose alarm or a falsely reassuring reading can lead to severe, un-treated hypoglycaemia — seizure, coma or death. This lab is a deliberately vulnerable simulation (GlucoSense CGM-3000) that teaches students to find and fix the flaws that would let an attacker read, forge or suppress that safety-critical data.
 - **Safety risk management file:** CGM-3000 Risk Management File (ISO 14971) (RMF-CGM-3000 rev A)
 - **Methodology:** STRIDE per element
-- **Severity scale:** Built-in qualitative scale (2 of 212 threats scored with CVSS v4.0)
+- **Severity scale:** Built-in qualitative scale (2 of 324 threats scored with CVSS v4.0)
 
 ## 1. Summary
 
 | Metric | Value |
 | --- | --- |
-| Elements analysed | 32 |
-| Data flows | 15 |
-| Trust boundaries | 3 |
+| Elements analysed | 45 |
+| Data flows | 24 |
+| Trust boundaries | 4 |
 | Assets | 4 |
-| Threats identified | 212 |
-| Threats affecting patient safety | 51 |
-| Safety-relevant elements | 16 |
+| Threats identified | 324 |
+| Threats affecting patient safety | 80 |
+| Safety-relevant elements | 22 |
 
 | Safety impact | What a compromise does to the patient | Threats |
 | --- | --- | --- |
 | Device control — Controls or actuates therapy / diagnosis | Unintended, altered or withheld therapy delivered to the patient. | 6 |
-| Alarms — Generates, carries or displays alarms | A real alarm is missed or suppressed, or false alarms drive alarm fatigue and unnecessary intervention. | 18 |
-| Clinical data — Produces clinical data used for decisions | A clinical decision is made on wrong, stale or missing data. | 26 |
-| Care delivery — Needed for timely care delivery | Care is delayed or cannot be delivered. | 1 |
+| Alarms — Generates, carries or displays alarms | A real alarm is missed or suppressed, or false alarms drive alarm fatigue and unnecessary intervention. | 36 |
+| Clinical data — Produces clinical data used for decisions | A clinical decision is made on wrong, stale or missing data. | 34 |
+| Care delivery — Needed for timely care delivery | Care is delayed or cannot be delivered. | 4 |
 
 | Severity | Critical | High | Medium | Low | Info |
 | --- | --- | --- | --- | --- | --- |
-| Threats | 49 | 118 | 37 | 8 | 0 |
+| Threats | 77 | 169 | 62 | 16 | 0 |
 
 | STRIDE | Property | Threats |
 | --- | --- | --- |
-| S — Spoofing | Authentication | 13 |
-| T — Tampering | Integrity | 61 |
-| R — Repudiation | Non-repudiation | 22 |
-| I — Information disclosure | Confidentiality | 41 |
-| D — Denial of service | Availability | 63 |
-| E — Elevation of privilege | Authorisation | 12 |
+| S — Spoofing | Authentication | 26 |
+| T — Tampering | Integrity | 90 |
+| R — Repudiation | Non-repudiation | 30 |
+| I — Information disclosure | Confidentiality | 63 |
+| D — Denial of service | Availability | 93 |
+| E — Elevation of privilege | Authorisation | 22 |
 
 ## 2. Diagram inventory
 
@@ -50,8 +50,9 @@ STRIDE threat model report — generated 2026-08-29 21:38
 | Boundary | Kind | Description |
 | --- | --- | --- |
 | Untrusted lab network + BLE RF | Internet / DMZ perimeter | Any peer on the isolated lab LAN, and the radio space around the appliance. No control is applied here. |
-| GlucoSense CGM-3000 appliance (Raspberry Pi 5) | Physical / facility | The device under test. All lab services bind 0.0.0.0 with no host firewall. |
+| GlucoSense CGM-3000 appliance (Raspberry Pi 5) | Physical / facility | The device under test. All lab services bind 0.0.0.0 with no host firewall, and its physical interfaces — USB ports, Bluetooth radio and touch panel — are live at the bedside. |
 | Host OS / root (SSH) | Privilege level | The Linux host the services run on. Root is the crown jewel (SEC-HAZ-009). |
+| Unattended bedside (physical access) | Physical / facility | The patient bay itself. Anyone who can walk up to the appliance can touch its screen, plug into its ports and stand inside Bluetooth range, usually unobserved. |
 
 ### 2.2 Elements
 
@@ -74,6 +75,10 @@ STRIDE threat model report — generated 2026-08-29 21:38
 | Patient glucose data / PHI | Asset | Per-patient readings, MRNs and demographics across HL7, MQTT and BLE. | Restricted (PII / PHI / PCI) | — | not set | GlucoSense CGM-3000 appliance (Raspberry Pi 5) | yes |
 | Hypo / hyper alarm path | Asset | The end-to-end path that turns a real low or high into an alarm the clinician sees and acts on. | Restricted (PII / PHI / PCI) | Alarms; Device control | Critical — permanent impairment or life-threatening injury | GlucoSense CGM-3000 appliance (Raspberry Pi 5) | yes |
 | Device & broker credentials | Asset | MQTT creds, Flask session secret, device serial, biomed SSH password. | Restricted (PII / PHI / PCI) | — | not set | GlucoSense CGM-3000 appliance (Raspberry Pi 5) | yes |
+| Visitor at the bedside | Entity | A visitor, a patient, a cleaner or a contractor: unauthenticated, unsupervised, and alone with the device for minutes at a time. | Restricted (PII / PHI / PCI) | — | not set | Unattended bedside (physical access) |  |
+| USB host ports (udev auto-mount) | Process | The Pi's four USB-A ports, live and unblanked at the bedside. udev auto-mounts any removable volume and the kernel binds any device that enumerates as a keyboard. Physical surface — not one of the numbered lab surfaces. | Restricted (PII / PHI / PCI) | Alarms; Care delivery | Critical — permanent impairment or life-threatening injury | GlucoSense CGM-3000 appliance (Raspberry Pi 5) |  |
+| Bluetooth stack (BlueZ / bluetoothd, root) | Process | The Pi's on-board controller and the BlueZ daemon: discoverable and pairable in the lab image, and the same radio the BLE advertiser broadcasts on. Physical / RF surface — not one of the numbered lab surfaces. | Restricted (PII / PHI / PCI) | Clinical data; Alarms | Critical — permanent impairment or life-threatening injury | GlucoSense CGM-3000 appliance (Raspberry Pi 5) |  |
+| Touchscreen HMI (DSI panel + libinput) | Process | The 7-inch bedside touch panel: the only thing the clinician actually looks at, and the input device for the kiosk session on tty1. Physical surface — not one of the numbered lab surfaces. | Restricted (PII / PHI / PCI) | Alarms; Clinical data; Care delivery | Serious — injury needing professional intervention | GlucoSense CGM-3000 appliance (Raspberry Pi 5) |  |
 
 ### 2.3 Data flows
 
@@ -94,6 +99,15 @@ STRIDE threat model report — generated 2026-08-29 21:38
 | Rogue HL7 query | Unauthenticated network client | HL7 MLLP listener (bi) | Other | None (cleartext) | Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5) |
 | SSH foothold | Unauthenticated network client | Host shell (biomed via SSH) (bi) | SFTP / SSH | TLS (server authenticated) | Untrusted lab network + BLE RF, Host OS / root (SSH) |
 | Privilege escalation | Host shell (biomed via SSH) | Root filesystem / sudoers (/etc/sudoers.d, /root) (bi) | Other | None (cleartext) | no |
+| USB port access | Visitor at the bedside | USB host ports (udev auto-mount) (bi) | Physical / manual transfer | None (cleartext) | GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access) |
+| Bluetooth pairing / GATT access | Visitor at the bedside | Bluetooth stack (BlueZ / bluetoothd, root) (bi) | Other | None (cleartext) | GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access) |
+| Unattended panel use | Visitor at the bedside | Touchscreen HMI (DSI panel + libinput) (bi) | Physical / manual transfer | None (cleartext) | GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access) |
+| Touch input / rendered display | Touchscreen HMI (DSI panel + libinput) | Bedside kiosk (Chromium / matchbox on DSI panel) (bi) | Other | None (cleartext) | no |
+| Bedside annunciation | Touchscreen HMI (DSI panel + libinput) | Clinician / caregiver | Physical / manual transfer | None (cleartext) | Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5) |
+| Paired HID input | Bluetooth stack (BlueZ / bluetoothd, root) | Bedside kiosk (Chromium / matchbox on DSI panel) | Other | None (cleartext) | no |
+| Removable-media config copy | USB host ports (udev auto-mount) | Device config (cgm.conf) (bi) | Physical / manual transfer | None (cleartext) | no |
+| Auto-mount + udev rule execution | USB host ports (udev auto-mount) | Root filesystem / sudoers (/etc/sudoers.d, /root) | Physical / manual transfer | None (cleartext) | GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH) |
+| HCI advertising control | BLE advertiser (runs as root) | Bluetooth stack (BlueZ / bluetoothd, root) | Other | None (cleartext) | no |
 
 ## 3. STRIDE coverage matrix
 
@@ -106,7 +120,7 @@ STRIDE threat model report — generated 2026-08-29 21:38
 | HL7 MLLP listener | Process | 3 | 2 | 1 | 1 | 2 | 3 |
 | MQTT broker (mosquitto) | Process | o | 4 | 3 | 1 | 4 | 2 |
 | BLE advertiser (runs as root) | Process | 1 | 3 | 1 | 1 | 2 | 3 |
-| Bedside kiosk (Chromium / matchbox on DSI panel) | Process | 3 | 3 | 2 | 1 | 4 | 2 |
+| Bedside kiosk (Chromium / matchbox on DSI panel) | Process | 5 | 3 | 2 | 1 | 4 | 2 |
 | Host shell (biomed via SSH) | Process | 1 | 2 | 1 | 2 | 1 | 1 |
 | User store (cgm.db, SQLite) | Data store | · | 2 | 2 | 2 | 2 | · |
 | Device config (cgm.conf) | Data store | · | 2 | 2 | 2 | 2 | · |
@@ -116,6 +130,10 @@ STRIDE threat model report — generated 2026-08-29 21:38
 | Patient glucose data / PHI | Asset | · | 1 | · | 1 | 1 | · |
 | Hypo / hyper alarm path | Asset | · | o | · | 1 | 1 | · |
 | Device & broker credentials | Asset | · | o | · | 2 | 1 | · |
+| Visitor at the bedside | Entity | 1 | · | 2 | · | · | · |
+| USB host ports (udev auto-mount) | Process | 3 | 3 | 2 | 1 | 3 | 4 |
+| Bluetooth stack (BlueZ / bluetoothd, root) | Process | 4 | 4 | 2 | 1 | 3 | 4 |
+| Touchscreen HMI (DSI panel + libinput) | Process | 3 | 3 | 2 | 1 | 4 | 2 |
 | HTTP attack surface | Data flow | · | 2 | · | 2 | 2 | · |
 | Console session | Data flow | · | 3 | · | 2 | 3 | · |
 | Bedside interaction | Data flow | · | 4 | · | 2 | 4 | · |
@@ -131,6 +149,15 @@ STRIDE threat model report — generated 2026-08-29 21:38
 | Rogue HL7 query | Data flow | · | 2 | · | 2 | 2 | · |
 | SSH foothold | Data flow | · | 1 | · | 1 | 2 | · |
 | Privilege escalation | Data flow | · | 1 | · | 1 | 1 | · |
+| USB port access | Data flow | · | 2 | · | 3 | 2 | · |
+| Bluetooth pairing / GATT access | Data flow | · | 2 | · | 2 | 2 | · |
+| Unattended panel use | Data flow | · | 2 | · | 3 | 2 | · |
+| Touch input / rendered display | Data flow | · | 3 | · | 1 | 3 | · |
+| Bedside annunciation | Data flow | · | 4 | · | 3 | 4 | · |
+| Paired HID input | Data flow | · | 2 | · | 1 | 3 | · |
+| Removable-media config copy | Data flow | · | 1 | · | 2 | 1 | · |
+| Auto-mount + udev rule execution | Data flow | · | 2 | · | 3 | 2 | · |
+| HCI advertising control | Data flow | · | 1 | · | 1 | 1 | · |
 
 ## 4. Threats and recommended mitigations
 
@@ -520,13 +547,13 @@ Actions taken by or through MQTT broker (mosquitto) cannot be reconstructed. Nei
 
 _With the leaked cred: WRITE glucose/# (forge 'IN_RANGE') and READ cgm/service/# (flag). READ glucose/# denied._
 
-#### T-174 · [D] Loss of Forged-reading injection removes control of therapy — **CRITICAL**
+#### T-219 · [D] Loss of Forged-reading injection removes control of therapy — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 Flooding, resource exhaustion or an unavailable dependency stops Forged-reading injection responding. Therapy cannot be started, adjusted or — the case people forget — stopped, and the clinician may not be told that control has been lost.
 
-> **Patient safety — SEC-HAZ-041 · Controls or actuates therapy / diagnosis**  
+> **Patient safety — SEC-HAZ-059 · Controls or actuates therapy / diagnosis**  
 > **Harm:** Therapy is interrupted, continues when it should have been stopped, or cannot be titrated while the patient deteriorates.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001, RC-011, RC-012
 
@@ -538,13 +565,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Rate limit and prioritise control traffic ahead of telemetry, logging and updates.
 - Alarm on loss of control communication rather than failing silently.
 
-#### T-176 · [D] Alarm delivery through Forged-reading injection can be blocked, delayed or flooded — **CRITICAL**
+#### T-221 · [D] Alarm delivery through Forged-reading injection can be blocked, delayed or flooded — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attacker floods, exhausts or simply cuts Forged-reading injection, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
 
-> **Patient safety — SEC-HAZ-043 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-061 · Generates, carries or displays alarms**  
 > **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001, RC-011, RC-012
 
@@ -556,13 +583,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
 - Keep an independent local annunciation that does not depend on the network at all.
 
-#### T-178 · [D] Clinical data from Forged-reading injection may be unavailable when a decision has to be made — **CRITICAL**
+#### T-223 · [D] Clinical data from Forged-reading injection may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes Forged-reading injection unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-045 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-063 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001, RC-011, RC-012
 
@@ -573,13 +600,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-173 · [T] Therapy parameters handled by Forged-reading injection can be altered without detection — **CRITICAL**
+#### T-218 · [T] Therapy parameters handled by Forged-reading injection can be altered without detection — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Dose, rate, duration, energy or programme values passing through Forged-reading injection can be modified — in transit, at rest, or by malformed input the code accepts — and neither the device nor the clinician can tell the value is not the one that was prescribed.
 
-> **Patient safety — SEC-HAZ-040 · Controls or actuates therapy / diagnosis**  
+> **Patient safety — SEC-HAZ-058 · Controls or actuates therapy / diagnosis**  
 > **Harm:** The patient receives an over-dose, under-dose or wrong therapy while the display and records show the intended value.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001, RC-011, RC-012
 
@@ -590,13 +617,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Range-check every parameter against clinically safe limits at the device, independently of whatever sent it.
 - Cross-check the value actually being delivered against the value that was prescribed, and alarm on divergence.
 
-#### T-175 · [T] Alarm conditions or thresholds at Forged-reading injection can be tampered with — **CRITICAL**
+#### T-220 · [T] Alarm conditions or thresholds at Forged-reading injection can be tampered with — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Forged-reading injection. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
 
-> **Patient safety — SEC-HAZ-042 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-060 · Generates, carries or displays alarms**  
 > **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001, RC-011, RC-012
 
@@ -608,13 +635,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Restrict who can change alarm limits, and record every change with the identity that made it.
 - Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
 
-#### T-177 · [T] Clinical data at Forged-reading injection can be altered or substituted — **CRITICAL**
+#### T-222 · [T] Clinical data at Forged-reading injection can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through Forged-reading injection, or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-044 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-062 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001, RC-011, RC-012
 
@@ -625,7 +652,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-167 · [T] Traffic on "Forged-reading injection" can be altered in transit — **HIGH**
+#### T-212 · [T] Traffic on "Forged-reading injection" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -638,7 +665,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-169 · [I] Data on "Forged-reading injection" is exposed in transit — **HIGH**
+#### T-214 · [I] Data on "Forged-reading injection" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -651,7 +678,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-171 · [D] "Forged-reading injection" can be flooded — **HIGH**
+#### T-216 · [D] "Forged-reading injection" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -664,7 +691,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-168 · [T] No end-to-end integrity on "Forged-reading injection" across a trust boundary — **HIGH**
+#### T-213 · [T] No end-to-end integrity on "Forged-reading injection" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -677,7 +704,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-170 · [I] Sensitive data leaves a trust boundary on "Forged-reading injection" — **HIGH**
+#### T-215 · [I] Sensitive data leaves a trust boundary on "Forged-reading injection" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -690,7 +717,172 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-172 · [D] Availability of "Forged-reading injection" as a dependency — **MEDIUM**
+#### T-217 · [D] Availability of "Forged-reading injection" as a dependency — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Bedside annunciation (Data flow)
+
+_What the clinician actually sees and hears at the bedside: current glucose, trend, and the hypo / hyper alarm._
+
+#### T-287 · [D] Alarm delivery through Bedside annunciation can be blocked, delayed or flooded — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attacker floods, exhausts or simply cuts Bedside annunciation, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
+
+> **Patient safety — SEC-HAZ-075 · Generates, carries or displays alarms**  
+> **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Set and verify a maximum alarm annunciation delay end to end; monitor it in service.
+- Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.
+- Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
+- Keep an independent local annunciation that does not depend on the network at all.
+
+#### T-289 · [D] Clinical data from Bedside annunciation may be unavailable when a decision has to be made — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attack, an outage or a ransomware event makes Bedside annunciation unavailable at the moment a clinician needs the data it holds or carries.
+
+> **Patient safety — SEC-HAZ-077 · Produces clinical data used for decisions**  
+> **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Define the downtime procedure and make sure clinicians have practised it.
+- Keep an independent, offline-capable copy of data needed for urgent care.
+- Cache the most recent values locally with an explicit staleness indicator.
+
+#### T-286 · [T] Alarm conditions or thresholds at Bedside annunciation can be tampered with — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Bedside annunciation. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
+
+> **Patient safety — SEC-HAZ-074 · Generates, carries or displays alarms**  
+> **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.
+- Sign alarm messages so a receiver can prove the alarm came from the device that raised it.
+- Restrict who can change alarm limits, and record every change with the identity that made it.
+- Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
+
+#### T-288 · [T] Clinical data at Bedside annunciation can be altered or substituted — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Measurements, images, results or the patient identity attached to them can be modified through Bedside annunciation, or the data of one patient can be presented as another's, without the clinician being able to detect it.
+
+> **Patient safety — SEC-HAZ-076 · Produces clinical data used for decisions**  
+> **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Bind clinical data to patient identity cryptographically and verify it at the point of display.
+- Sign results at the source; verify signatures before a result is used clinically.
+- Detect and flag stale data rather than displaying a last-known value as current.
+
+#### T-279 · [T] Traffic on "Bedside annunciation" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-281 · [I] Data on "Bedside annunciation" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-284 · [D] "Bedside annunciation" can be flooded — **HIGH**
+
+_Denial of service — violates Availability_
+
+The flow crosses into untrusted territory with no throttling, so an attacker can generate traffic on it faster than the receiving side can absorb, denying service to legitimate callers.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Rate limit per identity and per source at the boundary, before the expensive work happens.
+- Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
+- Put a CDN or scrubbing service in front of internet-facing entry points.
+
+#### T-280 · [T] No end-to-end integrity on "Bedside annunciation" across a trust boundary — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow crosses a trust boundary with only hop-by-hop protection. Any intermediary that terminates TLS - a load balancer, gateway, proxy or SaaS relay - can alter the message and the receiver cannot tell.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Sign messages or use a MAC so the receiver can verify the original sender.
+- Validate signed tokens at the destination rather than trusting a header added by a proxy.
+- Re-authorise at the destination instead of assuming the gateway did it.
+
+#### T-282 · [I] Sensitive data leaves a trust boundary on "Bedside annunciation" — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+This flow moves sensitive data across the trust boundary "Untrusted lab network + BLE RF" / "GlucoSense CGM-3000 appliance (Raspberry Pi 5)". Once it is on the other side, the controls, retention rules and monitoring on this side no longer apply, and you are relying on someone else's.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Minimise the payload: send identifiers or aggregates instead of full records where possible.
+- Mask, tokenise or redact fields the far side does not need.
+- Record the transfer, and confirm the receiving side's controls contractually and technically.
+
+#### T-283 · [I] Sensitive data moved by file share or physical transfer — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Bulk copies of sensitive data made by hand or over a file share tend to escape access control entirely: media is lost, shares are over-shared, and nobody can say where the copies ended up.
+
+Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Replace manual transfer with an authenticated, logged interface.
+- Encrypt media and files at rest, and track custody.
+- Set an expiry on the copy and verify deletion.
+
+#### T-285 · [D] Availability of "Bedside annunciation" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -857,13 +1049,13 @@ Unbounded growth, expensive queries, connection-pool exhaustion or lock contenti
 
 _Real readings + alarm state onto glucose/<patient>._
 
-#### T-161 · [D] Clinical data from Legitimate glucose publish may be unavailable when a decision has to be made — **CRITICAL**
+#### T-206 · [D] Clinical data from Legitimate glucose publish may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes Legitimate glucose publish unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-037 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-055 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001
 
@@ -872,13 +1064,13 @@ An attack, an outage or a ransomware event makes Legitimate glucose publish unav
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-163 · [D] Alarm delivery through Legitimate glucose publish can be blocked, delayed or flooded — **CRITICAL**
+#### T-208 · [D] Alarm delivery through Legitimate glucose publish can be blocked, delayed or flooded — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attacker floods, exhausts or simply cuts Legitimate glucose publish, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
 
-> **Patient safety — SEC-HAZ-039 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-057 · Generates, carries or displays alarms**  
 > **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001
 
@@ -888,13 +1080,13 @@ An attacker floods, exhausts or simply cuts Legitimate glucose publish, so alarm
 - Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
 - Keep an independent local annunciation that does not depend on the network at all.
 
-#### T-160 · [T] Clinical data at Legitimate glucose publish can be altered or substituted — **CRITICAL**
+#### T-205 · [T] Clinical data at Legitimate glucose publish can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through Legitimate glucose publish, or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-036 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-054 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001
 
@@ -903,13 +1095,13 @@ Measurements, images, results or the patient identity attached to them can be mo
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-162 · [T] Alarm conditions or thresholds at Legitimate glucose publish can be tampered with — **CRITICAL**
+#### T-207 · [T] Alarm conditions or thresholds at Legitimate glucose publish can be tampered with — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Legitimate glucose publish. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
 
-> **Patient safety — SEC-HAZ-038 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-056 · Generates, carries or displays alarms**  
 > **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
 > Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: not set · Safety file: SEC-HAZ-001
 
@@ -919,7 +1111,7 @@ Alarm limits, priorities, escalation rules or the alarm messages themselves can 
 - Restrict who can change alarm limits, and record every change with the identity that made it.
 - Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
 
-#### T-157 · [T] Traffic on "Legitimate glucose publish" can be altered in transit — **HIGH**
+#### T-202 · [T] Traffic on "Legitimate glucose publish" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -930,7 +1122,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-158 · [I] Data on "Legitimate glucose publish" is exposed in transit — **HIGH**
+#### T-203 · [I] Data on "Legitimate glucose publish" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -941,7 +1133,7 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-159 · [D] Availability of "Legitimate glucose publish" as a dependency — **MEDIUM**
+#### T-204 · [D] Availability of "Legitimate glucose publish" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -952,17 +1144,544 @@ If this flow stops working - the far side is down, slow, rate limiting you, or t
 - Monitor certificate expiry and dependency health as first-class alerts.
 - Queue or cache where eventual processing is acceptable.
 
+### USB host ports (udev auto-mount) (Process)
+
+_The Pi's four USB-A ports, live and unblanked at the bedside. udev auto-mounts any removable volume and the kernel binds any device that enumerates as a keyboard. Physical surface — not one of the numbered lab surfaces._
+
+#### T-130 · [S] Alarms carried by USB host ports (udev auto-mount) cannot be shown to be genuine — **CRITICAL**
+
+_Spoofing — violates Authentication_
+
+Anything that can reach USB host ports (udev auto-mount) can announce an alarm, or announce that an alarm has cleared, while claiming to be a device. Receivers have no way to tell a real alarm from a forged one.
+
+> **Patient safety — SEC-HAZ-030 · Generates, carries or displays alarms**  
+> **Harm:** False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one.  
+> **Hazardous situation (as modelled):** A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-010
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Authenticate the alarm source; prefer per-device identity (certificates) over a shared credential.
+- Include device identity, patient context and a timestamp inside the signed alarm payload.
+- Reconcile remote alarm state against the device periodically instead of trusting the last message received.
+
+#### T-128 · [T] Alarm conditions or thresholds at USB host ports (udev auto-mount) can be tampered with — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through USB host ports (udev auto-mount). An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
+
+> **Patient safety — SEC-HAZ-028 · Generates, carries or displays alarms**  
+> **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
+> **Hazardous situation (as modelled):** A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-010
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.
+- Sign alarm messages so a receiver can prove the alarm came from the device that raised it.
+- Restrict who can change alarm limits, and record every change with the identity that made it.
+- Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
+
+#### T-129 · [D] Alarm delivery through USB host ports (udev auto-mount) can be blocked, delayed or flooded — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attacker floods, exhausts or simply cuts USB host ports (udev auto-mount), so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
+
+> **Patient safety — SEC-HAZ-029 · Generates, carries or displays alarms**  
+> **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
+> **Hazardous situation (as modelled):** A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-010
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Set and verify a maximum alarm annunciation delay end to end; monitor it in service.
+- Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.
+- Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
+- Keep an independent local annunciation that does not depend on the network at all.
+
+#### T-127 · [E] Injection into a privileged process — **CRITICAL**
+
+_Elevation of privilege — violates Authorisation_
+
+Weak input handling combined with elevated privilege is the classic path to remote code execution: the attacker supplies the input, USB host ports (udev auto-mount) executes it, and it executes as a privileged account.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Fix both halves: strict allow-list validation and safe APIs, plus least privilege at runtime.
+- Isolate the parsing or execution of untrusted content in a sandboxed, unprivileged worker.
+- Add detection for anomalous child processes and outbound connections from this component.
+
+#### T-131 · [R] Alarm history at USB host ports (udev auto-mount) is not reliable evidence — **CRITICAL**
+
+_Repudiation — violates Non-repudiation_
+
+Whether an alarm fired, when it was annunciated, who acknowledged it and when it cleared is not recorded tamper-evidently at USB host ports (udev auto-mount).
+
+> **Patient safety — SEC-HAZ-031 · Generates, carries or displays alarms**  
+> **Harm:** After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected.  
+> **Hazardous situation (as modelled):** A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-010
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Log every alarm raise, annunciate, acknowledge, silence and clear event with identity and timestamp.
+- Store alarm history where the clinical or service user cannot edit it, and synchronise clocks.
+- Review silenced and repeatedly-acknowledged alarms as a safety signal.
+
+#### T-132 · [D] Loss of USB host ports (udev auto-mount) delays or prevents care — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+USB host ports (udev auto-mount) is on the path for delivering care. A denial-of-service, ransomware event or dependency outage removes it, and the clinical workflow it supports stops.
+
+> **Patient safety — SEC-HAZ-032 · Needed for timely care delivery**  
+> **Harm:** Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm.  
+> **Hazardous situation (as modelled):** A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-010
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Agree the maximum tolerable downtime with the clinical service and design to it.
+- Provide a documented, rehearsed manual fallback that does not depend on the compromised system.
+- Segment the device network so an outage elsewhere in the hospital cannot take clinical care down with it.
+
+#### T-119 · [S] USB host ports (udev auto-mount) accepts unauthenticated callers — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Any party that can reach USB host ports (udev auto-mount) is treated as a legitimate caller. Attackers can invoke its functions directly, bypassing whatever front end normally sits in front of it.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Authenticate every caller, including internal service-to-service calls.
+- Use mutual TLS or signed service tokens between internal components.
+- Do not rely on network position alone as proof of identity.
+
+#### T-316 · [S] Unauthenticated inbound flow "USB port access" — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Requests arriving over "USB port access" from Visitor at the bedside carry no proof of who sent them. USB host ports (udev auto-mount) therefore cannot distinguish a legitimate caller from anyone else who can reach that interface.
+
+Via data flow: USB port access
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Authenticate the flow itself: mutual TLS, a signed service token or a request signature.
+- Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
+- Do not treat "it came from inside the network" as authentication.
+
+#### T-120 · [T] Untrusted input reaches USB host ports (udev auto-mount) without strict validation — **HIGH**
+
+_Tampering — violates Integrity_
+
+Input crossing into USB host ports (udev auto-mount) is not constrained to a known-good shape, so an attacker can bend the process into doing something else: injection into queries, commands or templates, deserialisation abuse, or corruption of the data it writes.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Validate against an allow-list of type, length, format and range at the trust boundary.
+- Use parameterised queries and safe APIs instead of building strings for SQL, shell or templates.
+- Encode output for the context it lands in, and re-validate on the server even if the client already did.
+
+#### T-123 · [I] Weak authorisation over sensitive data in USB host ports (udev auto-mount) — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+USB host ports (udev auto-mount) handles sensitive data without a robust access decision on each object and function. A caller can request another user's record by changing an identifier, or reach a function that was only ever meant for staff.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Enforce deny-by-default authorisation on every request, checked server-side against the authenticated subject.
+- Check object-level ownership, not just that the caller is logged in.
+- Cover the negative cases in tests: another tenant's id, a guessed id, a removed role.
+
+#### T-125 · [E] USB host ports (udev auto-mount) runs with administrative privilege — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+Any code-execution or file-write bug in USB host ports (udev auto-mount) immediately becomes full control of the host, because the process already holds every privilege the operating system can grant.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Run as a dedicated unprivileged account with only the permissions the workload needs.
+- Drop capabilities, use a read-only filesystem, and isolate with containers or sandboxing.
+- Separate administrative functions into their own component with its own identity.
+
+#### T-126 · [E] No effective authorisation model in USB host ports (udev auto-mount) — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+Once a caller is inside, nothing distinguishes what they may do from what an administrator may do. A normal user can reach privileged functions simply by calling them.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Introduce roles or policies with deny-by-default, evaluated server-side.
+- Separate administrative endpoints and require step-up authentication for them.
+- Log every authorisation denial - a burst of denials is an attack in progress.
+
+#### T-317 · [E] Privilege crosses a trust boundary into USB host ports (udev auto-mount) — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+"USB port access" enters USB host ports (udev auto-mount) across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Unattended bedside (physical access)" without an authorisation decision of its own. Whatever the caller can request, USB host ports (udev auto-mount) will perform - so the trust of the far side becomes the trust of this side.
+
+Via data flow: USB port access
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Re-authorise at the boundary: the receiving element makes its own decision from the caller identity.
+- Grant the calling identity the narrowest set of operations that flow actually needs.
+- Treat everything arriving from across the boundary as untrusted input as well.
+
+#### T-121 · [T] Integrity of the code and configuration of USB host ports (udev auto-mount) — **MEDIUM**
+
+_Tampering — violates Integrity_
+
+If an attacker can alter the binary, container image, dependency or configuration that USB host ports (udev auto-mount) runs, every other control inside it is void. Supply-chain and deployment paths are part of this element's attack surface.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Pin and verify dependencies; review lockfile changes.
+- Sign build artefacts and verify signatures at deploy time; keep an immutable, reproducible image.
+- Treat configuration as code with review and integrity checks; restrict who can deploy.
+
+#### T-122 · [R] USB host ports (udev auto-mount) keeps no security audit trail — **MEDIUM**
+
+_Repudiation — violates Non-repudiation_
+
+Actions taken by or through USB host ports (udev auto-mount) cannot be reconstructed. Neither abuse by a legitimate user nor the blast radius of a compromise can be established after the fact.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Log authentication, authorisation decisions, and every change to data or configuration.
+- Record who, what, when, from where, and the outcome - and never the secret or the sensitive payload itself.
+- Forward logs off the host to storage the process cannot rewrite.
+
+#### T-124 · [D] USB host ports (udev auto-mount) has no protection against resource exhaustion — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+A flood of requests, an expensive query, a large upload or a slow dependency can consume all of the CPU, memory, connections or threads USB host ports (udev auto-mount) has, taking it down for everyone.
+
+**Controls already in place:** The enclosure is closed with two screws. Nothing else: no port blockers, no USB device authorisation (usbguard) or HID allow-list, no encryption on the SD card to stop offline imaging, and the mount helper runs from a root udev rule.
+
+**Recommended mitigations:**
+- Apply rate limits and quotas per identity and per source, with timeouts on every outbound call.
+- Bound request sizes, page sizes, recursion and query cost.
+- Fail fast with circuit breakers and shed load rather than queueing indefinitely.
+
+### Bluetooth stack (BlueZ / bluetoothd, root) (Process)
+
+_The Pi's on-board controller and the BlueZ daemon: discoverable and pairable in the lab image, and the same radio the BLE advertiser broadcasts on. Physical / RF surface — not one of the numbered lab surfaces._
+
+#### T-146 · [S] Alarms carried by Bluetooth stack (BlueZ / bluetoothd, root) cannot be shown to be genuine — **CRITICAL**
+
+_Spoofing — violates Authentication_
+
+Anything that can reach Bluetooth stack (BlueZ / bluetoothd, root) can announce an alarm, or announce that an alarm has cleared, while claiming to be a device. Receivers have no way to tell a real alarm from a forged one.
+
+> **Patient safety — SEC-HAZ-037 · Generates, carries or displays alarms**  
+> **Harm:** False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one.  
+> **Hazardous situation (as modelled):** A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-011
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Authenticate the alarm source; prefer per-device identity (certificates) over a shared credential.
+- Include device identity, patient context and a timestamp inside the signed alarm payload.
+- Reconcile remote alarm state against the device periodically instead of trusting the last message received.
+
+#### T-142 · [T] Clinical data at Bluetooth stack (BlueZ / bluetoothd, root) can be altered or substituted — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Measurements, images, results or the patient identity attached to them can be modified through Bluetooth stack (BlueZ / bluetoothd, root), or the data of one patient can be presented as another's, without the clinician being able to detect it.
+
+> **Patient safety — SEC-HAZ-033 · Produces clinical data used for decisions**  
+> **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
+> **Hazardous situation (as modelled):** A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-011
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Bind clinical data to patient identity cryptographically and verify it at the point of display.
+- Sign results at the source; verify signatures before a result is used clinically.
+- Detect and flag stale data rather than displaying a last-known value as current.
+
+#### T-144 · [T] Alarm conditions or thresholds at Bluetooth stack (BlueZ / bluetoothd, root) can be tampered with — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Bluetooth stack (BlueZ / bluetoothd, root). An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
+
+> **Patient safety — SEC-HAZ-035 · Generates, carries or displays alarms**  
+> **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
+> **Hazardous situation (as modelled):** A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-011
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.
+- Sign alarm messages so a receiver can prove the alarm came from the device that raised it.
+- Restrict who can change alarm limits, and record every change with the identity that made it.
+- Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
+
+#### T-143 · [D] Clinical data from Bluetooth stack (BlueZ / bluetoothd, root) may be unavailable when a decision has to be made — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attack, an outage or a ransomware event makes Bluetooth stack (BlueZ / bluetoothd, root) unavailable at the moment a clinician needs the data it holds or carries.
+
+> **Patient safety — SEC-HAZ-034 · Produces clinical data used for decisions**  
+> **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
+> **Hazardous situation (as modelled):** A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-011
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Define the downtime procedure and make sure clinicians have practised it.
+- Keep an independent, offline-capable copy of data needed for urgent care.
+- Cache the most recent values locally with an explicit staleness indicator.
+
+#### T-145 · [D] Alarm delivery through Bluetooth stack (BlueZ / bluetoothd, root) can be blocked, delayed or flooded — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attacker floods, exhausts or simply cuts Bluetooth stack (BlueZ / bluetoothd, root), so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
+
+> **Patient safety — SEC-HAZ-036 · Generates, carries or displays alarms**  
+> **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
+> **Hazardous situation (as modelled):** A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-011
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Set and verify a maximum alarm annunciation delay end to end; monitor it in service.
+- Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.
+- Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
+- Keep an independent local annunciation that does not depend on the network at all.
+
+#### T-141 · [E] Injection into a privileged process — **CRITICAL**
+
+_Elevation of privilege — violates Authorisation_
+
+Weak input handling combined with elevated privilege is the classic path to remote code execution: the attacker supplies the input, Bluetooth stack (BlueZ / bluetoothd, root) executes it, and it executes as a privileged account.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Fix both halves: strict allow-list validation and safe APIs, plus least privilege at runtime.
+- Isolate the parsing or execution of untrusted content in a sandboxed, unprivileged worker.
+- Add detection for anomalous child processes and outbound connections from this component.
+
+#### T-147 · [R] Alarm history at Bluetooth stack (BlueZ / bluetoothd, root) is not reliable evidence — **CRITICAL**
+
+_Repudiation — violates Non-repudiation_
+
+Whether an alarm fired, when it was annunciated, who acknowledged it and when it cleared is not recorded tamper-evidently at Bluetooth stack (BlueZ / bluetoothd, root).
+
+> **Patient safety — SEC-HAZ-038 · Generates, carries or displays alarms**  
+> **Harm:** After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected.  
+> **Hazardous situation (as modelled):** A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.  
+> Severity of harm: Critical — permanent impairment or life-threatening injury · Software safety class: Class C — death or serious injury possible · Safety file: SEC-HAZ-011
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Log every alarm raise, annunciate, acknowledge, silence and clear event with identity and timestamp.
+- Store alarm history where the clinical or service user cannot edit it, and synchronise clocks.
+- Review silenced and repeatedly-acknowledged alarms as a safety signal.
+
+#### T-133 · [S] Bluetooth stack (BlueZ / bluetoothd, root) accepts unauthenticated callers — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Any party that can reach Bluetooth stack (BlueZ / bluetoothd, root) is treated as a legitimate caller. Attackers can invoke its functions directly, bypassing whatever front end normally sits in front of it.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Authenticate every caller, including internal service-to-service calls.
+- Use mutual TLS or signed service tokens between internal components.
+- Do not rely on network position alone as proof of identity.
+
+#### T-318 · [S] Unauthenticated inbound flow "Bluetooth pairing / GATT access" — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Requests arriving over "Bluetooth pairing / GATT access" from Visitor at the bedside carry no proof of who sent them. Bluetooth stack (BlueZ / bluetoothd, root) therefore cannot distinguish a legitimate caller from anyone else who can reach that interface.
+
+Via data flow: Bluetooth pairing / GATT access
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Authenticate the flow itself: mutual TLS, a signed service token or a request signature.
+- Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
+- Do not treat "it came from inside the network" as authentication.
+
+#### T-324 · [S] Unauthenticated inbound flow "HCI advertising control" — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Requests arriving over "HCI advertising control" from BLE advertiser (runs as root) carry no proof of who sent them. Bluetooth stack (BlueZ / bluetoothd, root) therefore cannot distinguish a legitimate caller from anyone else who can reach that interface.
+
+Via data flow: HCI advertising control
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Authenticate the flow itself: mutual TLS, a signed service token or a request signature.
+- Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
+- Do not treat "it came from inside the network" as authentication.
+
+#### T-134 · [T] Untrusted input reaches Bluetooth stack (BlueZ / bluetoothd, root) without strict validation — **HIGH**
+
+_Tampering — violates Integrity_
+
+Input crossing into Bluetooth stack (BlueZ / bluetoothd, root) is not constrained to a known-good shape, so an attacker can bend the process into doing something else: injection into queries, commands or templates, deserialisation abuse, or corruption of the data it writes.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Validate against an allow-list of type, length, format and range at the trust boundary.
+- Use parameterised queries and safe APIs instead of building strings for SQL, shell or templates.
+- Encode output for the context it lands in, and re-validate on the server even if the client already did.
+
+#### T-137 · [I] Weak authorisation over sensitive data in Bluetooth stack (BlueZ / bluetoothd, root) — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Bluetooth stack (BlueZ / bluetoothd, root) handles sensitive data without a robust access decision on each object and function. A caller can request another user's record by changing an identifier, or reach a function that was only ever meant for staff.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Enforce deny-by-default authorisation on every request, checked server-side against the authenticated subject.
+- Check object-level ownership, not just that the caller is logged in.
+- Cover the negative cases in tests: another tenant's id, a guessed id, a removed role.
+
+#### T-139 · [E] Bluetooth stack (BlueZ / bluetoothd, root) runs with administrative privilege — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+Any code-execution or file-write bug in Bluetooth stack (BlueZ / bluetoothd, root) immediately becomes full control of the host, because the process already holds every privilege the operating system can grant.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Run as a dedicated unprivileged account with only the permissions the workload needs.
+- Drop capabilities, use a read-only filesystem, and isolate with containers or sandboxing.
+- Separate administrative functions into their own component with its own identity.
+
+#### T-140 · [E] No effective authorisation model in Bluetooth stack (BlueZ / bluetoothd, root) — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+Once a caller is inside, nothing distinguishes what they may do from what an administrator may do. A normal user can reach privileged functions simply by calling them.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Introduce roles or policies with deny-by-default, evaluated server-side.
+- Separate administrative endpoints and require step-up authentication for them.
+- Log every authorisation denial - a burst of denials is an attack in progress.
+
+#### T-319 · [E] Privilege crosses a trust boundary into Bluetooth stack (BlueZ / bluetoothd, root) — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+"Bluetooth pairing / GATT access" enters Bluetooth stack (BlueZ / bluetoothd, root) across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Unattended bedside (physical access)" without an authorisation decision of its own. Whatever the caller can request, Bluetooth stack (BlueZ / bluetoothd, root) will perform - so the trust of the far side becomes the trust of this side.
+
+Via data flow: Bluetooth pairing / GATT access
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Re-authorise at the boundary: the receiving element makes its own decision from the caller identity.
+- Grant the calling identity the narrowest set of operations that flow actually needs.
+- Treat everything arriving from across the boundary as untrusted input as well.
+
+#### T-135 · [T] Integrity of the code and configuration of Bluetooth stack (BlueZ / bluetoothd, root) — **MEDIUM**
+
+_Tampering — violates Integrity_
+
+If an attacker can alter the binary, container image, dependency or configuration that Bluetooth stack (BlueZ / bluetoothd, root) runs, every other control inside it is void. Supply-chain and deployment paths are part of this element's attack surface.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Pin and verify dependencies; review lockfile changes.
+- Sign build artefacts and verify signatures at deploy time; keep an immutable, reproducible image.
+- Treat configuration as code with review and integrity checks; restrict who can deploy.
+
+#### T-136 · [R] Bluetooth stack (BlueZ / bluetoothd, root) keeps no security audit trail — **MEDIUM**
+
+_Repudiation — violates Non-repudiation_
+
+Actions taken by or through Bluetooth stack (BlueZ / bluetoothd, root) cannot be reconstructed. Neither abuse by a legitimate user nor the blast radius of a compromise can be established after the fact.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Log authentication, authorisation decisions, and every change to data or configuration.
+- Record who, what, when, from where, and the outcome - and never the secret or the sensitive payload itself.
+- Forward logs off the host to storage the process cannot rewrite.
+
+#### T-138 · [D] Bluetooth stack (BlueZ / bluetoothd, root) has no protection against resource exhaustion — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+A flood of requests, an expensive query, a large upload or a slow dependency can consume all of the CPU, memory, connections or threads Bluetooth stack (BlueZ / bluetoothd, root) has, taking it down for everyone.
+
+**Controls already in place:** Nothing hardens it. bluetoothd runs as root over D-Bus, the controller is left discoverable, pairing is Just Works with no confirmation on the panel, and no allow-list limits which HID or GATT peer may connect — so hcitool, bluetoothctl and gatttool from any laptop in range all reach it.
+
+**Recommended mitigations:**
+- Apply rate limits and quotas per identity and per source, with timeouts on every outbound call.
+- Bound request sizes, page sizes, recursion and query cost.
+- Fail fast with circuit breakers and shed load rather than queueing indefinitely.
+
 ### Console session (Data flow)
 
 _Clinician reviews glucose/alarms and administers the device._
 
-#### T-128 · [T] Clinical data at Console session can be altered or substituted — **CRITICAL**
+#### T-173 · [T] Clinical data at Console session can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through Console session, or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-028 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-046 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-002
 
@@ -973,13 +1692,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-129 · [D] Clinical data from Console session may be unavailable when a decision has to be made — **CRITICAL**
+#### T-174 · [D] Clinical data from Console session may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes Console session unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-029 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-047 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-002
 
@@ -990,7 +1709,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-122 · [T] Traffic on "Console session" can be altered in transit — **HIGH**
+#### T-167 · [T] Traffic on "Console session" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1003,7 +1722,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-124 · [I] Data on "Console session" is exposed in transit — **HIGH**
+#### T-169 · [I] Data on "Console session" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1016,7 +1735,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-123 · [T] No end-to-end integrity on "Console session" across a trust boundary — **HIGH**
+#### T-168 · [T] No end-to-end integrity on "Console session" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1029,7 +1748,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-125 · [I] Sensitive data leaves a trust boundary on "Console session" — **HIGH**
+#### T-170 · [I] Sensitive data leaves a trust boundary on "Console session" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1042,7 +1761,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-126 · [D] "Console session" can be flooded — **HIGH**
+#### T-171 · [D] "Console session" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -1055,7 +1774,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-127 · [D] Availability of "Console session" as a dependency — **MEDIUM**
+#### T-172 · [D] Availability of "Console session" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -1072,13 +1791,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 
 _Clinician glances at the kiosk and unlocks it at the bedside._
 
-#### T-136 · [T] Alarm conditions or thresholds at Bedside interaction can be tampered with — **CRITICAL**
+#### T-181 · [T] Alarm conditions or thresholds at Bedside interaction can be tampered with — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Bedside interaction. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
 
-> **Patient safety — SEC-HAZ-030 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-048 · Generates, carries or displays alarms**  
 > **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1090,13 +1809,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Restrict who can change alarm limits, and record every change with the identity that made it.
 - Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
 
-#### T-138 · [T] Clinical data at Bedside interaction can be altered or substituted — **CRITICAL**
+#### T-183 · [T] Clinical data at Bedside interaction can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through Bedside interaction, or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-032 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-050 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1107,13 +1826,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-137 · [D] Alarm delivery through Bedside interaction can be blocked, delayed or flooded — **CRITICAL**
+#### T-182 · [D] Alarm delivery through Bedside interaction can be blocked, delayed or flooded — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attacker floods, exhausts or simply cuts Bedside interaction, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
 
-> **Patient safety — SEC-HAZ-031 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-049 · Generates, carries or displays alarms**  
 > **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1125,13 +1844,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
 - Keep an independent local annunciation that does not depend on the network at all.
 
-#### T-139 · [D] Clinical data from Bedside interaction may be unavailable when a decision has to be made — **CRITICAL**
+#### T-184 · [D] Clinical data from Bedside interaction may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes Bedside interaction unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-033 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-051 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1142,7 +1861,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-130 · [T] Traffic on "Bedside interaction" can be altered in transit — **HIGH**
+#### T-175 · [T] Traffic on "Bedside interaction" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1155,7 +1874,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-132 · [I] Data on "Bedside interaction" is exposed in transit — **HIGH**
+#### T-177 · [I] Data on "Bedside interaction" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1168,7 +1887,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-131 · [T] No end-to-end integrity on "Bedside interaction" across a trust boundary — **HIGH**
+#### T-176 · [T] No end-to-end integrity on "Bedside interaction" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1181,7 +1900,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-133 · [I] Sensitive data leaves a trust boundary on "Bedside interaction" — **HIGH**
+#### T-178 · [I] Sensitive data leaves a trust boundary on "Bedside interaction" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1194,7 +1913,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-134 · [D] "Bedside interaction" can be flooded — **HIGH**
+#### T-179 · [D] "Bedside interaction" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -1207,7 +1926,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-135 · [D] Availability of "Bedside interaction" as a dependency — **MEDIUM**
+#### T-180 · [D] Availability of "Bedside interaction" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -1473,7 +2192,7 @@ An attack, an outage or a ransomware event makes Bedside kiosk (Chromium / match
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-207 · [S] Unauthenticated inbound flow "Bedside interaction" — **HIGH**
+#### T-310 · [S] Unauthenticated inbound flow "Bedside interaction" — **HIGH**
 
 _Spoofing — violates Authentication_
 
@@ -1526,7 +2245,7 @@ Bedside kiosk (Chromium / matchbox on DSI panel) is on the path for delivering c
 - Provide a documented, rehearsed manual fallback that does not depend on the compromised system.
 - Segment the device network so an outage elsewhere in the hospital cannot take clinical care down with it.
 
-#### T-208 · [E] Privilege crosses a trust boundary into Bedside kiosk (Chromium / matchbox on DSI panel) — **HIGH**
+#### T-311 · [E] Privilege crosses a trust boundary into Bedside kiosk (Chromium / matchbox on DSI panel) — **HIGH**
 
 _Elevation of privilege — violates Authorisation_
 
@@ -1555,6 +2274,36 @@ Any party that can reach Bedside kiosk (Chromium / matchbox on DSI panel) is tre
 - Authenticate every caller, including internal service-to-service calls.
 - Use mutual TLS or signed service tokens between internal components.
 - Do not rely on network position alone as proof of identity.
+
+#### T-322 · [S] Unauthenticated inbound flow "Touch input / rendered display" — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Requests arriving over "Touch input / rendered display" from Touchscreen HMI (DSI panel + libinput) carry no proof of who sent them. Bedside kiosk (Chromium / matchbox on DSI panel) therefore cannot distinguish a legitimate caller from anyone else who can reach that interface.
+
+Via data flow: Touch input / rendered display
+
+**Controls already in place:** PIN check is server-side now (not in the page source). But /kiosk/unlock has no rate limit, lockout or delay -> all 10,000 four-digit PINs in seconds, and it returns the flag with no session.
+
+**Recommended mitigations:**
+- Authenticate the flow itself: mutual TLS, a signed service token or a request signature.
+- Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
+- Do not treat "it came from inside the network" as authentication.
+
+#### T-323 · [S] Unauthenticated inbound flow "Paired HID input" — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Requests arriving over "Paired HID input" from Bluetooth stack (BlueZ / bluetoothd, root) carry no proof of who sent them. Bedside kiosk (Chromium / matchbox on DSI panel) therefore cannot distinguish a legitimate caller from anyone else who can reach that interface.
+
+Via data flow: Paired HID input
+
+**Controls already in place:** PIN check is server-side now (not in the page source). But /kiosk/unlock has no rate limit, lockout or delay -> all 10,000 four-digit PINs in seconds, and it returns the flag with no session.
+
+**Recommended mitigations:**
+- Authenticate the flow itself: mutual TLS, a signed service token or a request signature.
+- Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
+- Do not treat "it came from inside the network" as authentication.
 
 #### T-52 · [T] Untrusted input reaches Bedside kiosk (Chromium / matchbox on DSI panel) without strict validation — **HIGH**
 
@@ -1621,17 +2370,261 @@ A flood of requests, an expensive query, a large upload or a slow dependency can
 - Bound request sizes, page sizes, recursion and query cost.
 - Fail fast with circuit breakers and shed load rather than queueing indefinitely.
 
+### Touchscreen HMI (DSI panel + libinput) (Process)
+
+_The 7-inch bedside touch panel: the only thing the clinician actually looks at, and the input device for the kiosk session on tty1. Physical surface — not one of the numbered lab surfaces._
+
+#### T-156 · [S] Alarms carried by Touchscreen HMI (DSI panel + libinput) cannot be shown to be genuine — **CRITICAL**
+
+_Spoofing — violates Authentication_
+
+Anything that can reach Touchscreen HMI (DSI panel + libinput) can announce an alarm, or announce that an alarm has cleared, while claiming to be a device. Receivers have no way to tell a real alarm from a forged one.
+
+> **Patient safety — SEC-HAZ-041 · Generates, carries or displays alarms**  
+> **Harm:** False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Authenticate the alarm source; prefer per-device identity (certificates) over a shared credential.
+- Include device identity, patient context and a timestamp inside the signed alarm payload.
+- Reconcile remote alarm state against the device periodically instead of trusting the last message received.
+
+#### T-154 · [T] Alarm conditions or thresholds at Touchscreen HMI (DSI panel + libinput) can be tampered with — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Touchscreen HMI (DSI panel + libinput). An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
+
+> **Patient safety — SEC-HAZ-039 · Generates, carries or displays alarms**  
+> **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.
+- Sign alarm messages so a receiver can prove the alarm came from the device that raised it.
+- Restrict who can change alarm limits, and record every change with the identity that made it.
+- Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
+
+#### T-158 · [T] Clinical data at Touchscreen HMI (DSI panel + libinput) can be altered or substituted — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Measurements, images, results or the patient identity attached to them can be modified through Touchscreen HMI (DSI panel + libinput), or the data of one patient can be presented as another's, without the clinician being able to detect it.
+
+> **Patient safety — SEC-HAZ-043 · Produces clinical data used for decisions**  
+> **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Bind clinical data to patient identity cryptographically and verify it at the point of display.
+- Sign results at the source; verify signatures before a result is used clinically.
+- Detect and flag stale data rather than displaying a last-known value as current.
+
+#### T-155 · [D] Alarm delivery through Touchscreen HMI (DSI panel + libinput) can be blocked, delayed or flooded — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attacker floods, exhausts or simply cuts Touchscreen HMI (DSI panel + libinput), so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
+
+> **Patient safety — SEC-HAZ-040 · Generates, carries or displays alarms**  
+> **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Set and verify a maximum alarm annunciation delay end to end; monitor it in service.
+- Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.
+- Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
+- Keep an independent local annunciation that does not depend on the network at all.
+
+#### T-159 · [D] Clinical data from Touchscreen HMI (DSI panel + libinput) may be unavailable when a decision has to be made — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attack, an outage or a ransomware event makes Touchscreen HMI (DSI panel + libinput) unavailable at the moment a clinician needs the data it holds or carries.
+
+> **Patient safety — SEC-HAZ-044 · Produces clinical data used for decisions**  
+> **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Define the downtime procedure and make sure clinicians have practised it.
+- Keep an independent, offline-capable copy of data needed for urgent care.
+- Cache the most recent values locally with an explicit staleness indicator.
+
+#### T-157 · [R] Alarm history at Touchscreen HMI (DSI panel + libinput) is not reliable evidence — **HIGH**
+
+_Repudiation — violates Non-repudiation_
+
+Whether an alarm fired, when it was annunciated, who acknowledged it and when it cleared is not recorded tamper-evidently at Touchscreen HMI (DSI panel + libinput).
+
+> **Patient safety — SEC-HAZ-042 · Generates, carries or displays alarms**  
+> **Harm:** After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Log every alarm raise, annunciate, acknowledge, silence and clear event with identity and timestamp.
+- Store alarm history where the clinical or service user cannot edit it, and synchronise clocks.
+- Review silenced and repeatedly-acknowledged alarms as a safety signal.
+
+#### T-160 · [D] Loss of Touchscreen HMI (DSI panel + libinput) delays or prevents care — **HIGH**
+
+_Denial of service — violates Availability_
+
+Touchscreen HMI (DSI panel + libinput) is on the path for delivering care. A denial-of-service, ransomware event or dependency outage removes it, and the clinical workflow it supports stops.
+
+> **Patient safety — SEC-HAZ-045 · Needed for timely care delivery**  
+> **Harm:** Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm.  
+> **Hazardous situation (as modelled):** This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Agree the maximum tolerable downtime with the clinical service and design to it.
+- Provide a documented, rehearsed manual fallback that does not depend on the compromised system.
+- Segment the device network so an outage elsewhere in the hospital cannot take clinical care down with it.
+
+#### T-148 · [S] Touchscreen HMI (DSI panel + libinput) accepts unauthenticated callers — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Any party that can reach Touchscreen HMI (DSI panel + libinput) is treated as a legitimate caller. Attackers can invoke its functions directly, bypassing whatever front end normally sits in front of it.
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Authenticate every caller, including internal service-to-service calls.
+- Use mutual TLS or signed service tokens between internal components.
+- Do not rely on network position alone as proof of identity.
+
+#### T-320 · [S] Unauthenticated inbound flow "Unattended panel use" — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Requests arriving over "Unattended panel use" from Visitor at the bedside carry no proof of who sent them. Touchscreen HMI (DSI panel + libinput) therefore cannot distinguish a legitimate caller from anyone else who can reach that interface.
+
+Via data flow: Unattended panel use
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Authenticate the flow itself: mutual TLS, a signed service token or a request signature.
+- Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
+- Do not treat "it came from inside the network" as authentication.
+
+#### T-149 · [T] Untrusted input reaches Touchscreen HMI (DSI panel + libinput) without strict validation — **HIGH**
+
+_Tampering — violates Integrity_
+
+Input crossing into Touchscreen HMI (DSI panel + libinput) is not constrained to a known-good shape, so an attacker can bend the process into doing something else: injection into queries, commands or templates, deserialisation abuse, or corruption of the data it writes.
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Validate against an allow-list of type, length, format and range at the trust boundary.
+- Use parameterised queries and safe APIs instead of building strings for SQL, shell or templates.
+- Encode output for the context it lands in, and re-validate on the server even if the client already did.
+
+#### T-151 · [I] Weak authorisation over sensitive data in Touchscreen HMI (DSI panel + libinput) — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Touchscreen HMI (DSI panel + libinput) handles sensitive data without a robust access decision on each object and function. A caller can request another user's record by changing an identifier, or reach a function that was only ever meant for staff.
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Enforce deny-by-default authorisation on every request, checked server-side against the authenticated subject.
+- Check object-level ownership, not just that the caller is logged in.
+- Cover the negative cases in tests: another tenant's id, a guessed id, a removed role.
+
+#### T-153 · [E] No effective authorisation model in Touchscreen HMI (DSI panel + libinput) — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+Once a caller is inside, nothing distinguishes what they may do from what an administrator may do. A normal user can reach privileged functions simply by calling them.
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Introduce roles or policies with deny-by-default, evaluated server-side.
+- Separate administrative endpoints and require step-up authentication for them.
+- Log every authorisation denial - a burst of denials is an attack in progress.
+
+#### T-321 · [E] Privilege crosses a trust boundary into Touchscreen HMI (DSI panel + libinput) — **HIGH**
+
+_Elevation of privilege — violates Authorisation_
+
+"Unattended panel use" enters Touchscreen HMI (DSI panel + libinput) across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Unattended bedside (physical access)" without an authorisation decision of its own. Whatever the caller can request, Touchscreen HMI (DSI panel + libinput) will perform - so the trust of the far side becomes the trust of this side.
+
+Via data flow: Unattended panel use
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Re-authorise at the boundary: the receiving element makes its own decision from the caller identity.
+- Grant the calling identity the narrowest set of operations that flow actually needs.
+- Treat everything arriving from across the boundary as untrusted input as well.
+
+#### T-150 · [R] Touchscreen HMI (DSI panel + libinput) keeps no security audit trail — **MEDIUM**
+
+_Repudiation — violates Non-repudiation_
+
+Actions taken by or through Touchscreen HMI (DSI panel + libinput) cannot be reconstructed. Neither abuse by a legitimate user nor the blast radius of a compromise can be established after the fact.
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Log authentication, authorisation decisions, and every change to data or configuration.
+- Record who, what, when, from where, and the outcome - and never the secret or the sensitive payload itself.
+- Forward logs off the host to storage the process cannot rewrite.
+
+#### T-152 · [D] Touchscreen HMI (DSI panel + libinput) has no protection against resource exhaustion — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+A flood of requests, an expensive query, a large upload or a slow dependency can consume all of the CPU, memory, connections or threads Touchscreen HMI (DSI panel + libinput) has, taking it down for everyone.
+
+**Controls already in place:** None worth the name. The panel has no screen lock and no inactivity timeout, so any touch goes straight into the kiosk; long-press and multi-touch still reach the Chromium context menu and the on-screen keyboard, which makes the panel a general purpose input device rather than a fixed display.
+
+**Recommended mitigations:**
+- Apply rate limits and quotas per identity and per source, with timeouts on every outbound call.
+- Bound request sizes, page sizes, recursion and query cost.
+- Fail fast with circuit breakers and shed load rather than queueing indefinitely.
+
 ### HL7 v2 query / result (MLLP) (Data flow)
 
 _QRY^Q01 in, ORU^R01 with PHI out. Cleartext, unauthenticated._
 
-#### T-146 · [T] Clinical data at HL7 v2 query / result (MLLP) can be altered or substituted — **CRITICAL**
+#### T-191 · [T] Clinical data at HL7 v2 query / result (MLLP) can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through HL7 v2 query / result (MLLP), or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-034 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-052 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Minor — temporary injury, no professional intervention · Software safety class: not set · Safety file: SEC-HAZ-005
 
@@ -1642,13 +2635,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-147 · [D] Clinical data from HL7 v2 query / result (MLLP) may be unavailable when a decision has to be made — **CRITICAL**
+#### T-192 · [D] Clinical data from HL7 v2 query / result (MLLP) may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes HL7 v2 query / result (MLLP) unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-035 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-053 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Minor — temporary injury, no professional intervention · Software safety class: not set · Safety file: SEC-HAZ-005
 
@@ -1659,7 +2652,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-140 · [T] Traffic on "HL7 v2 query / result (MLLP)" can be altered in transit — **HIGH**
+#### T-185 · [T] Traffic on "HL7 v2 query / result (MLLP)" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1672,7 +2665,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-142 · [I] Data on "HL7 v2 query / result (MLLP)" is exposed in transit — **HIGH**
+#### T-187 · [I] Data on "HL7 v2 query / result (MLLP)" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1685,7 +2678,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-141 · [T] No end-to-end integrity on "HL7 v2 query / result (MLLP)" across a trust boundary — **HIGH**
+#### T-186 · [T] No end-to-end integrity on "HL7 v2 query / result (MLLP)" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1698,7 +2691,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-143 · [I] Sensitive data leaves a trust boundary on "HL7 v2 query / result (MLLP)" — **HIGH**
+#### T-188 · [I] Sensitive data leaves a trust boundary on "HL7 v2 query / result (MLLP)" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1711,7 +2704,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-144 · [D] "HL7 v2 query / result (MLLP)" can be flooded — **HIGH**
+#### T-189 · [D] "HL7 v2 query / result (MLLP)" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -1724,7 +2717,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-145 · [D] Availability of "HL7 v2 query / result (MLLP)" as a dependency — **MEDIUM**
+#### T-190 · [D] Availability of "HL7 v2 query / result (MLLP)" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -1741,13 +2734,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 
 _Glucose + alarm state pushed to the kiosk._
 
-#### T-182 · [T] Alarm conditions or thresholds at Bedside display feed can be tampered with — **CRITICAL**
+#### T-227 · [T] Alarm conditions or thresholds at Bedside display feed can be tampered with — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Bedside display feed. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
 
-> **Patient safety — SEC-HAZ-046 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-064 · Generates, carries or displays alarms**  
 > **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1757,13 +2750,13 @@ Alarm limits, priorities, escalation rules or the alarm messages themselves can 
 - Restrict who can change alarm limits, and record every change with the identity that made it.
 - Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
 
-#### T-184 · [T] Clinical data at Bedside display feed can be altered or substituted — **CRITICAL**
+#### T-229 · [T] Clinical data at Bedside display feed can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through Bedside display feed, or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-048 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-066 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1772,13 +2765,13 @@ Measurements, images, results or the patient identity attached to them can be mo
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-183 · [D] Alarm delivery through Bedside display feed can be blocked, delayed or flooded — **CRITICAL**
+#### T-228 · [D] Alarm delivery through Bedside display feed can be blocked, delayed or flooded — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attacker floods, exhausts or simply cuts Bedside display feed, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
 
-> **Patient safety — SEC-HAZ-047 · Generates, carries or displays alarms**  
+> **Patient safety — SEC-HAZ-065 · Generates, carries or displays alarms**  
 > **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1788,13 +2781,13 @@ An attacker floods, exhausts or simply cuts Bedside display feed, so alarms are 
 - Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
 - Keep an independent local annunciation that does not depend on the network at all.
 
-#### T-185 · [D] Clinical data from Bedside display feed may be unavailable when a decision has to be made — **CRITICAL**
+#### T-230 · [D] Clinical data from Bedside display feed may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes Bedside display feed unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-049 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-067 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Serious — injury needing professional intervention · Software safety class: not set · Safety file: SEC-HAZ-008
 
@@ -1803,7 +2796,7 @@ An attack, an outage or a ransomware event makes Bedside display feed unavailabl
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-179 · [T] Traffic on "Bedside display feed" can be altered in transit — **HIGH**
+#### T-224 · [T] Traffic on "Bedside display feed" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1814,7 +2807,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-180 · [I] Data on "Bedside display feed" is exposed in transit — **HIGH**
+#### T-225 · [I] Data on "Bedside display feed" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1825,7 +2818,7 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-181 · [D] Availability of "Bedside display feed" as a dependency — **LOW**
+#### T-226 · [D] Availability of "Bedside display feed" as a dependency — **LOW**
 
 _Denial of service — violates Availability_
 
@@ -1840,13 +2833,13 @@ If this flow stops working - the far side is down, slow, rate limiting you, or t
 
 _Non-connectable broadcast of XOR-obfuscated manufacturer data (company id 0xFFFF)._
 
-#### T-192 · [T] Clinical data at BLE advertisement (RF) can be altered or substituted — **CRITICAL**
+#### T-237 · [T] Clinical data at BLE advertisement (RF) can be altered or substituted — **CRITICAL**
 
 _Tampering — violates Integrity_
 
 Measurements, images, results or the patient identity attached to them can be modified through BLE advertisement (RF), or the data of one patient can be presented as another's, without the clinician being able to detect it.
 
-> **Patient safety — SEC-HAZ-050 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-068 · Produces clinical data used for decisions**  
 > **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
 > Severity of harm: Minor — temporary injury, no professional intervention · Software safety class: not set · Safety file: SEC-HAZ-007
 
@@ -1857,13 +2850,13 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Sign results at the source; verify signatures before a result is used clinically.
 - Detect and flag stale data rather than displaying a last-known value as current.
 
-#### T-193 · [D] Clinical data from BLE advertisement (RF) may be unavailable when a decision has to be made — **CRITICAL**
+#### T-238 · [D] Clinical data from BLE advertisement (RF) may be unavailable when a decision has to be made — **CRITICAL**
 
 _Denial of service — violates Availability_
 
 An attack, an outage or a ransomware event makes BLE advertisement (RF) unavailable at the moment a clinician needs the data it holds or carries.
 
-> **Patient safety — SEC-HAZ-051 · Produces clinical data used for decisions**  
+> **Patient safety — SEC-HAZ-069 · Produces clinical data used for decisions**  
 > **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
 > Severity of harm: Minor — temporary injury, no professional intervention · Software safety class: not set · Safety file: SEC-HAZ-007
 
@@ -1874,7 +2867,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-186 · [T] Traffic on "BLE advertisement (RF)" can be altered in transit — **HIGH**
+#### T-231 · [T] Traffic on "BLE advertisement (RF)" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1887,7 +2880,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-188 · [I] Data on "BLE advertisement (RF)" is exposed in transit — **HIGH**
+#### T-233 · [I] Data on "BLE advertisement (RF)" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1900,7 +2893,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-187 · [T] No end-to-end integrity on "BLE advertisement (RF)" across a trust boundary — **HIGH**
+#### T-232 · [T] No end-to-end integrity on "BLE advertisement (RF)" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -1913,7 +2906,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-189 · [I] Sensitive data leaves a trust boundary on "BLE advertisement (RF)" — **HIGH**
+#### T-234 · [I] Sensitive data leaves a trust boundary on "BLE advertisement (RF)" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -1926,7 +2919,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-190 · [D] "BLE advertisement (RF)" can be flooded — **MEDIUM**
+#### T-235 · [D] "BLE advertisement (RF)" can be flooded — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -1939,13 +2932,196 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-191 · [D] Availability of "BLE advertisement (RF)" as a dependency — **LOW**
+#### T-236 · [D] Availability of "BLE advertisement (RF)" as a dependency — **LOW**
 
 _Denial of service — violates Availability_
 
 If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
 
 Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberry Pi 5)
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Touch input / rendered display (Data flow)
+
+_Touch events into the kiosk session on tty1, and the glucose trend and alarm view rendered back to the panel._
+
+#### T-275 · [T] Alarm conditions or thresholds at Touch input / rendered display can be tampered with — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Touch input / rendered display. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
+
+> **Patient safety — SEC-HAZ-070 · Generates, carries or displays alarms**  
+> **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Recommended mitigations:**
+- Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.
+- Sign alarm messages so a receiver can prove the alarm came from the device that raised it.
+- Restrict who can change alarm limits, and record every change with the identity that made it.
+- Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
+
+#### T-277 · [T] Clinical data at Touch input / rendered display can be altered or substituted — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Measurements, images, results or the patient identity attached to them can be modified through Touch input / rendered display, or the data of one patient can be presented as another's, without the clinician being able to detect it.
+
+> **Patient safety — SEC-HAZ-072 · Produces clinical data used for decisions**  
+> **Harm:** A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Recommended mitigations:**
+- Bind clinical data to patient identity cryptographically and verify it at the point of display.
+- Sign results at the source; verify signatures before a result is used clinically.
+- Detect and flag stale data rather than displaying a last-known value as current.
+
+#### T-276 · [D] Alarm delivery through Touch input / rendered display can be blocked, delayed or flooded — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attacker floods, exhausts or simply cuts Touch input / rendered display, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
+
+> **Patient safety — SEC-HAZ-071 · Generates, carries or displays alarms**  
+> **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Recommended mitigations:**
+- Set and verify a maximum alarm annunciation delay end to end; monitor it in service.
+- Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.
+- Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
+- Keep an independent local annunciation that does not depend on the network at all.
+
+#### T-278 · [D] Clinical data from Touch input / rendered display may be unavailable when a decision has to be made — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attack, an outage or a ransomware event makes Touch input / rendered display unavailable at the moment a clinician needs the data it holds or carries.
+
+> **Patient safety — SEC-HAZ-073 · Produces clinical data used for decisions**  
+> **Harm:** Treatment is delayed, or a decision is made without information that was available yesterday.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-012
+
+**Recommended mitigations:**
+- Define the downtime procedure and make sure clinicians have practised it.
+- Keep an independent, offline-capable copy of data needed for urgent care.
+- Cache the most recent values locally with an explicit staleness indicator.
+
+#### T-272 · [T] Traffic on "Touch input / rendered display" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-273 · [I] Data on "Touch input / rendered display" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-274 · [D] Availability of "Touch input / rendered display" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Paired HID input (Data flow)
+
+_A Bluetooth keyboard paired from outside the bay types into the kiosk session exactly as the bedside user would._
+
+#### T-293 · [T] Alarm conditions or thresholds at Paired HID input can be tampered with — **CRITICAL**
+
+_Tampering — violates Integrity_
+
+Alarm limits, priorities, escalation rules or the alarm messages themselves can be modified through Paired HID input. An alarm can be silenced, downgraded, re-routed or fabricated, and the clinical team sees the altered state as the truth.
+
+> **Patient safety — SEC-HAZ-078 · Generates, carries or displays alarms**  
+> **Harm:** A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-011
+
+**Recommended mitigations:**
+- Protect alarm limits and escalation configuration with integrity checks; treat a change to them as a clinical event, not a setting.
+- Sign alarm messages so a receiver can prove the alarm came from the device that raised it.
+- Restrict who can change alarm limits, and record every change with the identity that made it.
+- Annunciate locally at the device as well as remotely, so tampering with one path does not silence both.
+
+#### T-294 · [D] Alarm delivery through Paired HID input can be blocked, delayed or flooded — **CRITICAL**
+
+_Denial of service — violates Availability_
+
+An attacker floods, exhausts or simply cuts Paired HID input, so alarms are queued, dropped or delayed past the point where they are clinically useful. The inverse is equally dangerous: a flood of injected alarms buries the real one.
+
+> **Patient safety — SEC-HAZ-079 · Generates, carries or displays alarms**  
+> **Harm:** Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-011
+
+**Recommended mitigations:**
+- Set and verify a maximum alarm annunciation delay end to end; monitor it in service.
+- Give alarm traffic its own prioritised, rate-limited path that ordinary traffic cannot starve.
+- Fail loud: if the alarm path cannot be confirmed available, raise a local technical alarm.
+- Keep an independent local annunciation that does not depend on the network at all.
+
+#### T-295 · [D] Loss of Paired HID input delays or prevents care — **HIGH**
+
+_Denial of service — violates Availability_
+
+Paired HID input is on the path for delivering care. A denial-of-service, ransomware event or dependency outage removes it, and the clinical workflow it supports stops.
+
+> **Patient safety — SEC-HAZ-080 · Needed for timely care delivery**  
+> **Harm:** Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm.  
+> Severity of harm: Serious — injury needing professional intervention · Software safety class: Class B — non-serious injury possible · Safety file: SEC-HAZ-011
+
+**Recommended mitigations:**
+- Agree the maximum tolerable downtime with the clinical service and design to it.
+- Provide a documented, rehearsed manual fallback that does not depend on the compromised system.
+- Segment the device network so an outage elsewhere in the hospital cannot take clinical care down with it.
+
+#### T-290 · [T] Traffic on "Paired HID input" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-291 · [I] Data on "Paired HID input" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-292 · [D] Availability of "Paired HID input" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
 
 **Recommended mitigations:**
 - Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
@@ -1992,7 +3168,7 @@ An attack, an outage or a ransomware event makes HL7 MLLP listener unavailable a
 - Keep an independent, offline-capable copy of data needed for urgent care.
 - Cache the most recent values locally with an explicit staleness indicator.
 
-#### T-209 · [S] Unauthenticated inbound flow "HL7 v2 query / result (MLLP)" — **HIGH**
+#### T-312 · [S] Unauthenticated inbound flow "HL7 v2 query / result (MLLP)" — **HIGH**
 
 _Spoofing — violates Authentication_
 
@@ -2009,7 +3185,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
 - Do not treat "it came from inside the network" as authentication.
 
-#### T-211 · [S] Unauthenticated inbound flow "Rogue HL7 query" — **HIGH**
+#### T-314 · [S] Unauthenticated inbound flow "Rogue HL7 query" — **HIGH**
 
 _Spoofing — violates Authentication_
 
@@ -2026,7 +3202,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Reject requests whose identity cannot be verified rather than defaulting to a shared identity.
 - Do not treat "it came from inside the network" as authentication.
 
-#### T-210 · [E] Privilege crosses a trust boundary into HL7 MLLP listener — **HIGH**
+#### T-313 · [E] Privilege crosses a trust boundary into HL7 MLLP listener — **HIGH**
 
 _Elevation of privilege — violates Authorisation_
 
@@ -2043,7 +3219,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Grant the calling identity the narrowest set of operations that flow actually needs.
 - Treat everything arriving from across the boundary as untrusted input as well.
 
-#### T-212 · [E] Privilege crosses a trust boundary into HL7 MLLP listener — **HIGH**
+#### T-315 · [E] Privilege crosses a trust boundary into HL7 MLLP listener — **HIGH**
 
 _Elevation of privilege — violates Authorisation_
 
@@ -2169,6 +3345,42 @@ There is no reliable record of what Unauthenticated network client did. Unauthen
 _Repudiation — violates Non-repudiation_
 
 Unauthenticated network client is untrusted and unidentified, yet the interaction involves sensitive data. Nothing can be attributed to a specific person, so abuse is invisible and disputes are unresolvable.
+
+**Recommended mitigations:**
+- Require identification before sensitive data is reached, even if the rest of the flow stays anonymous.
+- If anonymity is a requirement, minimise what sensitive data is exposed on the anonymous path.
+
+### Visitor at the bedside (Entity)
+
+_A visitor, a patient, a cleaner or a contractor: unauthenticated, unsupervised, and alone with the device for minutes at a time._
+
+#### T-116 · [S] No proof of identity for Visitor at the bedside — **HIGH**
+
+_Spoofing — violates Authentication_
+
+Nothing establishes that a request really comes from Visitor at the bedside. An attacker on the network, or anyone who can reach the interface, can act as Visitor at the bedside and every downstream decision made about that identity is worthless.
+
+**Recommended mitigations:**
+- Require authentication before any state-changing or data-returning operation.
+- Prefer federated identity (OIDC/SAML) or client certificates over hand-rolled schemes.
+- Bind the session to the authenticated identity and re-check it on every request, not just at login.
+
+#### T-117 · [R] Actions by Visitor at the bedside are not attributable — **HIGH**
+
+_Repudiation — violates Non-repudiation_
+
+There is no reliable record of what Visitor at the bedside did. Visitor at the bedside can deny an action, and an investigation after an incident cannot establish what happened or how far it went.
+
+**Recommended mitigations:**
+- Log authentication events and every security-relevant action with the actor identity, source and timestamp.
+- Ship logs to append-only storage the actor cannot edit, and set a retention period that matches your obligations.
+- Synchronise clocks (NTP) so events can be correlated across systems.
+
+#### T-118 · [R] Anonymous actor touches sensitive data — **HIGH**
+
+_Repudiation — violates Non-repudiation_
+
+Visitor at the bedside is untrusted and unidentified, yet the interaction involves sensitive data. Nothing can be attributed to a specific person, so abuse is invisible and disputes are unresolvable.
 
 **Recommended mitigations:**
 - Require identification before sensitive data is reached, even if the rest of the flow stays anonymous.
@@ -2376,7 +3588,7 @@ Unbounded growth, expensive queries, connection-pool exhaustion or lock contenti
 
 _SQLi login, cookie forgery + IDOR, path traversal, rate-limit bypass, kiosk unlock._
 
-#### T-116 · [T] Traffic on "HTTP attack surface" can be altered in transit — **HIGH**
+#### T-161 · [T] Traffic on "HTTP attack surface" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2389,7 +3601,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-118 · [I] Data on "HTTP attack surface" is exposed in transit — **HIGH**
+#### T-163 · [I] Data on "HTTP attack surface" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2402,7 +3614,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-117 · [T] No end-to-end integrity on "HTTP attack surface" across a trust boundary — **HIGH**
+#### T-162 · [T] No end-to-end integrity on "HTTP attack surface" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2415,7 +3627,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-119 · [I] Sensitive data leaves a trust boundary on "HTTP attack surface" — **HIGH**
+#### T-164 · [I] Sensitive data leaves a trust boundary on "HTTP attack surface" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2428,7 +3640,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-120 · [D] "HTTP attack surface" can be flooded — **HIGH**
+#### T-165 · [D] "HTTP attack surface" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -2441,7 +3653,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-121 · [D] Availability of "HTTP attack surface" as a dependency — **MEDIUM**
+#### T-166 · [D] Availability of "HTTP attack surface" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -2458,7 +3670,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 
 _Any HL7 speaker crafts a valid QRY^Q01 and receives PHI + serial._
 
-#### T-194 · [T] Traffic on "Rogue HL7 query" can be altered in transit — **HIGH**
+#### T-239 · [T] Traffic on "Rogue HL7 query" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2471,7 +3683,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-196 · [I] Data on "Rogue HL7 query" is exposed in transit — **HIGH**
+#### T-241 · [I] Data on "Rogue HL7 query" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2484,7 +3696,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-195 · [T] No end-to-end integrity on "Rogue HL7 query" across a trust boundary — **HIGH**
+#### T-240 · [T] No end-to-end integrity on "Rogue HL7 query" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2497,7 +3709,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-197 · [I] Sensitive data leaves a trust boundary on "Rogue HL7 query" — **HIGH**
+#### T-242 · [I] Sensitive data leaves a trust boundary on "Rogue HL7 query" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2510,7 +3722,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-198 · [D] "Rogue HL7 query" can be flooded — **HIGH**
+#### T-243 · [D] "Rogue HL7 query" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -2523,7 +3735,7 @@ Crosses: Untrusted lab network + BLE RF, GlucoSense CGM-3000 appliance (Raspberr
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-199 · [D] Availability of "Rogue HL7 query" as a dependency — **MEDIUM**
+#### T-244 · [D] Availability of "Rogue HL7 query" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -2787,7 +3999,7 @@ Unbounded growth, expensive queries, connection-pool exhaustion or lock contenti
 
 _String-built SELECT against the user table (SQLi)._
 
-#### T-148 · [T] Traffic on "Login query" can be altered in transit — **HIGH**
+#### T-193 · [T] Traffic on "Login query" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2798,7 +4010,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-149 · [I] Data on "Login query" is exposed in transit — **HIGH**
+#### T-194 · [I] Data on "Login query" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2809,7 +4021,7 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-150 · [D] Availability of "Login query" as a dependency — **LOW**
+#### T-195 · [D] Availability of "Login query" as a dependency — **LOW**
 
 _Denial of service — violates Availability_
 
@@ -2824,7 +4036,7 @@ If this flow stops working - the far side is down, slow, rate limiting you, or t
 
 _/admin/export joins the filename with no containment -> traversal._
 
-#### T-151 · [T] Traffic on "Diagnostic export / config read" can be altered in transit — **HIGH**
+#### T-196 · [T] Traffic on "Diagnostic export / config read" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2835,7 +4047,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-152 · [I] Data on "Diagnostic export / config read" is exposed in transit — **HIGH**
+#### T-197 · [I] Data on "Diagnostic export / config read" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2846,7 +4058,7 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-153 · [D] Availability of "Diagnostic export / config read" as a dependency — **LOW**
+#### T-198 · [D] Availability of "Diagnostic export / config read" as a dependency — **LOW**
 
 _Denial of service — violates Availability_
 
@@ -2861,7 +4073,7 @@ If this flow stops working - the far side is down, slow, rate limiting you, or t
 
 _Console reads current glucose/alarm state to display._
 
-#### T-154 · [T] Traffic on "Console telemetry" can be altered in transit — **HIGH**
+#### T-199 · [T] Traffic on "Console telemetry" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2872,7 +4084,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-155 · [I] Data on "Console telemetry" is exposed in transit — **HIGH**
+#### T-200 · [I] Data on "Console telemetry" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2883,7 +4095,7 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-156 · [D] Availability of "Console telemetry" as a dependency — **LOW**
+#### T-201 · [D] Availability of "Console telemetry" as a dependency — **LOW**
 
 _Denial of service — violates Availability_
 
@@ -2898,7 +4110,7 @@ If this flow stops working - the far side is down, slow, rate limiting you, or t
 
 _Broker persists the latest retained reading/alarm per topic._
 
-#### T-164 · [T] Traffic on "Retained telemetry" can be altered in transit — **HIGH**
+#### T-209 · [T] Traffic on "Retained telemetry" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2909,7 +4121,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-165 · [I] Data on "Retained telemetry" is exposed in transit — **HIGH**
+#### T-210 · [I] Data on "Retained telemetry" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2920,7 +4132,7 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-166 · [D] Availability of "Retained telemetry" as a dependency — **MEDIUM**
+#### T-211 · [D] Availability of "Retained telemetry" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -2935,7 +4147,7 @@ If this flow stops working - the far side is down, slow, rate limiting you, or t
 
 _NOPASSWD sudo on /usr/bin/awk (GTFOBins) spawns a root shell._
 
-#### T-204 · [T] Traffic on "Privilege escalation" can be altered in transit — **HIGH**
+#### T-249 · [T] Traffic on "Privilege escalation" can be altered in transit — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -2946,7 +4158,7 @@ The flow is not cryptographically protected, so anyone positioned on the path - 
 - Use mutual TLS where both ends are services you control.
 - Reject downgrade to plaintext rather than falling back to it.
 
-#### T-205 · [I] Data on "Privilege escalation" is exposed in transit — **HIGH**
+#### T-250 · [I] Data on "Privilege escalation" is exposed in transit — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -2957,7 +4169,459 @@ Everything carried by this flow - credentials, tokens, records - is readable to 
 - Keep secrets out of URLs and query strings, which are logged by every intermediary.
 - For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
 
-#### T-206 · [D] Availability of "Privilege escalation" as a dependency — **LOW**
+#### T-251 · [D] Availability of "Privilege escalation" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### USB port access (Data flow)
+
+_BadUSB keystroke injection, auto-mounted mass storage, a bootable stick, and imaging the SD card off the device._
+
+#### T-252 · [T] Traffic on "USB port access" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-254 · [I] Data on "USB port access" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-253 · [T] No end-to-end integrity on "USB port access" across a trust boundary — **MEDIUM**
+
+_Tampering — violates Integrity_
+
+The flow crosses a trust boundary with only hop-by-hop protection. Any intermediary that terminates TLS - a load balancer, gateway, proxy or SaaS relay - can alter the message and the receiver cannot tell.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Sign messages or use a MAC so the receiver can verify the original sender.
+- Validate signed tokens at the destination rather than trusting a header added by a proxy.
+- Re-authorise at the destination instead of assuming the gateway did it.
+
+#### T-255 · [I] Sensitive data leaves a trust boundary on "USB port access" — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+This flow moves sensitive data across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Unattended bedside (physical access)". Once it is on the other side, the controls, retention rules and monitoring on this side no longer apply, and you are relying on someone else's.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Minimise the payload: send identifiers or aggregates instead of full records where possible.
+- Mask, tokenise or redact fields the far side does not need.
+- Record the transfer, and confirm the receiving side's controls contractually and technically.
+
+#### T-256 · [I] Sensitive data moved by file share or physical transfer — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+Bulk copies of sensitive data made by hand or over a file share tend to escape access control entirely: media is lost, shares are over-shared, and nobody can say where the copies ended up.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Replace manual transfer with an authenticated, logged interface.
+- Encrypt media and files at rest, and track custody.
+- Set an expiry on the copy and verify deletion.
+
+#### T-257 · [D] "USB port access" can be flooded — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+The flow crosses into untrusted territory with no throttling, so an attacker can generate traffic on it faster than the receiving side can absorb, denying service to legitimate callers.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Rate limit per identity and per source at the boundary, before the expensive work happens.
+- Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
+- Put a CDN or scrubbing service in front of internet-facing entry points.
+
+#### T-258 · [D] Availability of "USB port access" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Bluetooth pairing / GATT access (Data flow)
+
+_Just Works pairing of an HID keyboard, GATT enumeration of the advertiser, and RF flooding of the controller — all from outside the bay._
+
+#### T-259 · [T] Traffic on "Bluetooth pairing / GATT access" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-261 · [I] Data on "Bluetooth pairing / GATT access" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-260 · [T] No end-to-end integrity on "Bluetooth pairing / GATT access" across a trust boundary — **MEDIUM**
+
+_Tampering — violates Integrity_
+
+The flow crosses a trust boundary with only hop-by-hop protection. Any intermediary that terminates TLS - a load balancer, gateway, proxy or SaaS relay - can alter the message and the receiver cannot tell.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Sign messages or use a MAC so the receiver can verify the original sender.
+- Validate signed tokens at the destination rather than trusting a header added by a proxy.
+- Re-authorise at the destination instead of assuming the gateway did it.
+
+#### T-262 · [I] Sensitive data leaves a trust boundary on "Bluetooth pairing / GATT access" — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+This flow moves sensitive data across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Unattended bedside (physical access)". Once it is on the other side, the controls, retention rules and monitoring on this side no longer apply, and you are relying on someone else's.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Minimise the payload: send identifiers or aggregates instead of full records where possible.
+- Mask, tokenise or redact fields the far side does not need.
+- Record the transfer, and confirm the receiving side's controls contractually and technically.
+
+#### T-263 · [D] "Bluetooth pairing / GATT access" can be flooded — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+The flow crosses into untrusted territory with no throttling, so an attacker can generate traffic on it faster than the receiving side can absorb, denying service to legitimate callers.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Rate limit per identity and per source at the boundary, before the expensive work happens.
+- Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
+- Put a CDN or scrubbing service in front of internet-facing entry points.
+
+#### T-264 · [D] Availability of "Bluetooth pairing / GATT access" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Unattended panel use (Data flow)
+
+_Anyone in the bay can read the panel and drive it: kiosk PIN guessing, gesture escape to the browser, on-screen keyboard._
+
+#### T-265 · [T] Traffic on "Unattended panel use" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-267 · [I] Data on "Unattended panel use" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-266 · [T] No end-to-end integrity on "Unattended panel use" across a trust boundary — **MEDIUM**
+
+_Tampering — violates Integrity_
+
+The flow crosses a trust boundary with only hop-by-hop protection. Any intermediary that terminates TLS - a load balancer, gateway, proxy or SaaS relay - can alter the message and the receiver cannot tell.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Sign messages or use a MAC so the receiver can verify the original sender.
+- Validate signed tokens at the destination rather than trusting a header added by a proxy.
+- Re-authorise at the destination instead of assuming the gateway did it.
+
+#### T-268 · [I] Sensitive data leaves a trust boundary on "Unattended panel use" — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+This flow moves sensitive data across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Unattended bedside (physical access)". Once it is on the other side, the controls, retention rules and monitoring on this side no longer apply, and you are relying on someone else's.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Minimise the payload: send identifiers or aggregates instead of full records where possible.
+- Mask, tokenise or redact fields the far side does not need.
+- Record the transfer, and confirm the receiving side's controls contractually and technically.
+
+#### T-269 · [I] Sensitive data moved by file share or physical transfer — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+Bulk copies of sensitive data made by hand or over a file share tend to escape access control entirely: media is lost, shares are over-shared, and nobody can say where the copies ended up.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Replace manual transfer with an authenticated, logged interface.
+- Encrypt media and files at rest, and track custody.
+- Set an expiry on the copy and verify deletion.
+
+#### T-270 · [D] "Unattended panel use" can be flooded — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+The flow crosses into untrusted territory with no throttling, so an attacker can generate traffic on it faster than the receiving side can absorb, denying service to legitimate callers.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Rate limit per identity and per source at the boundary, before the expensive work happens.
+- Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
+- Put a CDN or scrubbing service in front of internet-facing entry points.
+
+#### T-271 · [D] Availability of "Unattended panel use" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Unattended bedside (physical access)
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Removable-media config copy (Data flow)
+
+_Diagnostic dumps written to a USB stick and config restored from one — the device serial and the MQTT credentials travel with them._
+
+#### T-296 · [T] Traffic on "Removable-media config copy" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-297 · [I] Data on "Removable-media config copy" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-298 · [I] Sensitive data moved by file share or physical transfer — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+Bulk copies of sensitive data made by hand or over a file share tend to escape access control entirely: media is lost, shares are over-shared, and nobody can say where the copies ended up.
+
+**Recommended mitigations:**
+- Replace manual transfer with an authenticated, logged interface.
+- Encrypt media and files at rest, and track custody.
+- Set an expiry on the copy and verify deletion.
+
+#### T-299 · [D] Availability of "Removable-media config copy" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### Auto-mount + udev rule execution (Data flow)
+
+_Mount helpers and udev rules run as root the moment a device enumerates, so removable media reaches the root filesystem without anyone logging in._
+
+#### T-300 · [T] Traffic on "Auto-mount + udev rule execution" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-302 · [I] Data on "Auto-mount + udev rule execution" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-301 · [T] No end-to-end integrity on "Auto-mount + udev rule execution" across a trust boundary — **MEDIUM**
+
+_Tampering — violates Integrity_
+
+The flow crosses a trust boundary with only hop-by-hop protection. Any intermediary that terminates TLS - a load balancer, gateway, proxy or SaaS relay - can alter the message and the receiver cannot tell.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Sign messages or use a MAC so the receiver can verify the original sender.
+- Validate signed tokens at the destination rather than trusting a header added by a proxy.
+- Re-authorise at the destination instead of assuming the gateway did it.
+
+#### T-303 · [I] Sensitive data leaves a trust boundary on "Auto-mount + udev rule execution" — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+This flow moves sensitive data across the trust boundary "GlucoSense CGM-3000 appliance (Raspberry Pi 5)" / "Host OS / root (SSH)". Once it is on the other side, the controls, retention rules and monitoring on this side no longer apply, and you are relying on someone else's.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Minimise the payload: send identifiers or aggregates instead of full records where possible.
+- Mask, tokenise or redact fields the far side does not need.
+- Record the transfer, and confirm the receiving side's controls contractually and technically.
+
+#### T-304 · [I] Sensitive data moved by file share or physical transfer — **MEDIUM**
+
+_Information disclosure — violates Confidentiality_
+
+Bulk copies of sensitive data made by hand or over a file share tend to escape access control entirely: media is lost, shares are over-shared, and nobody can say where the copies ended up.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Replace manual transfer with an authenticated, logged interface.
+- Encrypt media and files at rest, and track custody.
+- Set an expiry on the copy and verify deletion.
+
+#### T-305 · [D] "Auto-mount + udev rule execution" can be flooded — **MEDIUM**
+
+_Denial of service — violates Availability_
+
+The flow crosses into untrusted territory with no throttling, so an attacker can generate traffic on it faster than the receiving side can absorb, denying service to legitimate callers.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Rate limit per identity and per source at the boundary, before the expensive work happens.
+- Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
+- Put a CDN or scrubbing service in front of internet-facing entry points.
+
+#### T-306 · [D] Availability of "Auto-mount + udev rule execution" as a dependency — **LOW**
+
+_Denial of service — violates Availability_
+
+If this flow stops working - the far side is down, slow, rate limiting you, or the certificate expires - what happens to the caller? Silent hangs propagate outages far beyond the failed component.
+
+Crosses: GlucoSense CGM-3000 appliance (Raspberry Pi 5), Host OS / root (SSH)
+
+**Recommended mitigations:**
+- Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.
+- Monitor certificate expiry and dependency health as first-class alerts.
+- Queue or cache where eventual processing is acceptable.
+
+### HCI advertising control (Data flow)
+
+_The advertiser drives the same controller through BlueZ, so whoever owns bluetoothd owns what the device broadcasts._
+
+#### T-307 · [T] Traffic on "HCI advertising control" can be altered in transit — **HIGH**
+
+_Tampering — violates Integrity_
+
+The flow is not cryptographically protected, so anyone positioned on the path - a compromised hop, a rogue wifi access point, a malicious proxy - can modify requests and responses as they pass.
+
+**Recommended mitigations:**
+- Require TLS 1.2+ with certificate validation; redirect and HSTS any cleartext port.
+- Use mutual TLS where both ends are services you control.
+- Reject downgrade to plaintext rather than falling back to it.
+
+#### T-308 · [I] Data on "HCI advertising control" is exposed in transit — **HIGH**
+
+_Information disclosure — violates Confidentiality_
+
+Everything carried by this flow - credentials, tokens, records - is readable to anyone who can observe the path, and a passive capture leaves no trace at either end.
+
+**Recommended mitigations:**
+- Encrypt in transit end to end; treat internal networks as hostile too.
+- Keep secrets out of URLs and query strings, which are logged by every intermediary.
+- For email or other store-and-forward transports, encrypt the payload itself rather than trusting the channel.
+
+#### T-309 · [D] Availability of "HCI advertising control" as a dependency — **LOW**
 
 _Denial of service — violates Availability_
 
@@ -3009,7 +4673,7 @@ This asset is business- or safety-critical. Loss of access to it - destruction, 
 
 _Password-auth SSH; biomed's password is dictionary-crackable._
 
-#### T-200 · [T] No end-to-end integrity on "SSH foothold" across a trust boundary — **HIGH**
+#### T-245 · [T] No end-to-end integrity on "SSH foothold" across a trust boundary — **HIGH**
 
 _Tampering — violates Integrity_
 
@@ -3022,7 +4686,7 @@ Crosses: Untrusted lab network + BLE RF, Host OS / root (SSH)
 - Validate signed tokens at the destination rather than trusting a header added by a proxy.
 - Re-authorise at the destination instead of assuming the gateway did it.
 
-#### T-201 · [I] Sensitive data leaves a trust boundary on "SSH foothold" — **HIGH**
+#### T-246 · [I] Sensitive data leaves a trust boundary on "SSH foothold" — **HIGH**
 
 _Information disclosure — violates Confidentiality_
 
@@ -3035,7 +4699,7 @@ Crosses: Untrusted lab network + BLE RF, Host OS / root (SSH)
 - Mask, tokenise or redact fields the far side does not need.
 - Record the transfer, and confirm the receiving side's controls contractually and technically.
 
-#### T-202 · [D] "SSH foothold" can be flooded — **HIGH**
+#### T-247 · [D] "SSH foothold" can be flooded — **HIGH**
 
 _Denial of service — violates Availability_
 
@@ -3048,7 +4712,7 @@ Crosses: Untrusted lab network + BLE RF, Host OS / root (SSH)
 - Set timeouts and retry budgets with backoff and jitter so retries do not amplify the flood.
 - Put a CDN or scrubbing service in front of internet-facing entry points.
 
-#### T-203 · [D] Availability of "SSH foothold" as a dependency — **MEDIUM**
+#### T-248 · [D] Availability of "SSH foothold" as a dependency — **MEDIUM**
 
 _Denial of service — violates Availability_
 
@@ -3156,30 +4820,59 @@ Each row is a security threat with a credible path to patient harm. Carry the ha
 | SEC-HAZ-025 | T-96 | Glucose telemetry (MQTT glucose/#, retained) | T | Alarms | Alarm conditions or thresholds at Glucose telemetry (MQTT glucose/#, retained) can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011 |
 | SEC-HAZ-026 | T-97 | Glucose telemetry (MQTT glucose/#, retained) | D | Alarms | Alarm delivery through Glucose telemetry (MQTT glucose/#, retained) can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011 |
 | SEC-HAZ-027 | T-98 | Glucose telemetry (MQTT glucose/#, retained) | R | Alarms | Alarm history at Glucose telemetry (MQTT glucose/#, retained) is not reliable evidence -> After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011 |
-| SEC-HAZ-028 | T-128 | Console session | T | Clinical data | Clinical data at Console session can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-002 |
-| SEC-HAZ-029 | T-129 | Console session | D | Clinical data | Clinical data from Console session may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-002 |
-| SEC-HAZ-030 | T-136 | Bedside interaction | T | Alarms | Alarm conditions or thresholds at Bedside interaction can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-031 | T-137 | Bedside interaction | D | Alarms | Alarm delivery through Bedside interaction can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-032 | T-138 | Bedside interaction | T | Clinical data | Clinical data at Bedside interaction can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-033 | T-139 | Bedside interaction | D | Clinical data | Clinical data from Bedside interaction may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-034 | T-146 | HL7 v2 query / result (MLLP) | T | Clinical data | Clinical data at HL7 v2 query / result (MLLP) can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-005 |
-| SEC-HAZ-035 | T-147 | HL7 v2 query / result (MLLP) | D | Clinical data | Clinical data from HL7 v2 query / result (MLLP) may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-005 |
-| SEC-HAZ-036 | T-160 | Legitimate glucose publish | T | Clinical data | Clinical data at Legitimate glucose publish can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
-| SEC-HAZ-037 | T-161 | Legitimate glucose publish | D | Clinical data | Clinical data from Legitimate glucose publish may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
-| SEC-HAZ-038 | T-162 | Legitimate glucose publish | T | Alarms | Alarm conditions or thresholds at Legitimate glucose publish can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
-| SEC-HAZ-039 | T-163 | Legitimate glucose publish | D | Alarms | Alarm delivery through Legitimate glucose publish can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
-| SEC-HAZ-040 | T-173 | Forged-reading injection | T | Device control | Therapy parameters handled by Forged-reading injection can be altered without detection -> The patient receives an over-dose, under-dose or wrong therapy while the display and records show the intended value. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
-| SEC-HAZ-041 | T-174 | Forged-reading injection | D | Device control | Loss of Forged-reading injection removes control of therapy -> Therapy is interrupted, continues when it should have been stopped, or cannot be titrated while the patient deteriorates. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
-| SEC-HAZ-042 | T-175 | Forged-reading injection | T | Alarms | Alarm conditions or thresholds at Forged-reading injection can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
-| SEC-HAZ-043 | T-176 | Forged-reading injection | D | Alarms | Alarm delivery through Forged-reading injection can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
-| SEC-HAZ-044 | T-177 | Forged-reading injection | T | Clinical data | Clinical data at Forged-reading injection can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
-| SEC-HAZ-045 | T-178 | Forged-reading injection | D | Clinical data | Clinical data from Forged-reading injection may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
-| SEC-HAZ-046 | T-182 | Bedside display feed | T | Alarms | Alarm conditions or thresholds at Bedside display feed can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-047 | T-183 | Bedside display feed | D | Alarms | Alarm delivery through Bedside display feed can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-048 | T-184 | Bedside display feed | T | Clinical data | Clinical data at Bedside display feed can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-049 | T-185 | Bedside display feed | D | Clinical data | Clinical data from Bedside display feed may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
-| SEC-HAZ-050 | T-192 | BLE advertisement (RF) | T | Clinical data | Clinical data at BLE advertisement (RF) can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-007 |
-| SEC-HAZ-051 | T-193 | BLE advertisement (RF) | D | Clinical data | Clinical data from BLE advertisement (RF) may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-007 |
+| SEC-HAZ-028 | T-128 | USB host ports (udev auto-mount) | T | Alarms | Alarm conditions or thresholds at USB host ports (udev auto-mount) can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-010 |
+| SEC-HAZ-029 | T-129 | USB host ports (udev auto-mount) | D | Alarms | Alarm delivery through USB host ports (udev auto-mount) can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-010 |
+| SEC-HAZ-030 | T-130 | USB host ports (udev auto-mount) | S | Alarms | Alarms carried by USB host ports (udev auto-mount) cannot be shown to be genuine -> False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-010 |
+| SEC-HAZ-031 | T-131 | USB host ports (udev auto-mount) | R | Alarms | Alarm history at USB host ports (udev auto-mount) is not reliable evidence -> After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-010 |
+| SEC-HAZ-032 | T-132 | USB host ports (udev auto-mount) | D | Care delivery | Loss of USB host ports (udev auto-mount) delays or prevents care -> Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-010 |
+| SEC-HAZ-033 | T-142 | Bluetooth stack (BlueZ / bluetoothd, root) | T | Clinical data | Clinical data at Bluetooth stack (BlueZ / bluetoothd, root) can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-034 | T-143 | Bluetooth stack (BlueZ / bluetoothd, root) | D | Clinical data | Clinical data from Bluetooth stack (BlueZ / bluetoothd, root) may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-035 | T-144 | Bluetooth stack (BlueZ / bluetoothd, root) | T | Alarms | Alarm conditions or thresholds at Bluetooth stack (BlueZ / bluetoothd, root) can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-036 | T-145 | Bluetooth stack (BlueZ / bluetoothd, root) | D | Alarms | Alarm delivery through Bluetooth stack (BlueZ / bluetoothd, root) can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-037 | T-146 | Bluetooth stack (BlueZ / bluetoothd, root) | S | Alarms | Alarms carried by Bluetooth stack (BlueZ / bluetoothd, root) cannot be shown to be genuine -> False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-038 | T-147 | Bluetooth stack (BlueZ / bluetoothd, root) | R | Alarms | Alarm history at Bluetooth stack (BlueZ / bluetoothd, root) is not reliable evidence -> After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-039 | T-154 | Touchscreen HMI (DSI panel + libinput) | T | Alarms | Alarm conditions or thresholds at Touchscreen HMI (DSI panel + libinput) can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-040 | T-155 | Touchscreen HMI (DSI panel + libinput) | D | Alarms | Alarm delivery through Touchscreen HMI (DSI panel + libinput) can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-041 | T-156 | Touchscreen HMI (DSI panel + libinput) | S | Alarms | Alarms carried by Touchscreen HMI (DSI panel + libinput) cannot be shown to be genuine -> False alarms cause unnecessary and potentially harmful intervention and erode trust in the alarm system; a forged "alarm cleared" hides a real one. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-042 | T-157 | Touchscreen HMI (DSI panel + libinput) | R | Alarms | Alarm history at Touchscreen HMI (DSI panel + libinput) is not reliable evidence -> After an adverse event it cannot be established whether the alarm system worked, so a systemic alarm failure stays invisible and uncorrected. | Serious — injury needing professional intervention | HIGH | SEC-HAZ-012 |
+| SEC-HAZ-043 | T-158 | Touchscreen HMI (DSI panel + libinput) | T | Clinical data | Clinical data at Touchscreen HMI (DSI panel + libinput) can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-044 | T-159 | Touchscreen HMI (DSI panel + libinput) | D | Clinical data | Clinical data from Touchscreen HMI (DSI panel + libinput) may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-045 | T-160 | Touchscreen HMI (DSI panel + libinput) | D | Care delivery | Loss of Touchscreen HMI (DSI panel + libinput) delays or prevents care -> Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm. | Serious — injury needing professional intervention | HIGH | SEC-HAZ-012 |
+| SEC-HAZ-046 | T-173 | Console session | T | Clinical data | Clinical data at Console session can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-002 |
+| SEC-HAZ-047 | T-174 | Console session | D | Clinical data | Clinical data from Console session may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-002 |
+| SEC-HAZ-048 | T-181 | Bedside interaction | T | Alarms | Alarm conditions or thresholds at Bedside interaction can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-049 | T-182 | Bedside interaction | D | Alarms | Alarm delivery through Bedside interaction can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-050 | T-183 | Bedside interaction | T | Clinical data | Clinical data at Bedside interaction can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-051 | T-184 | Bedside interaction | D | Clinical data | Clinical data from Bedside interaction may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-052 | T-191 | HL7 v2 query / result (MLLP) | T | Clinical data | Clinical data at HL7 v2 query / result (MLLP) can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-005 |
+| SEC-HAZ-053 | T-192 | HL7 v2 query / result (MLLP) | D | Clinical data | Clinical data from HL7 v2 query / result (MLLP) may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-005 |
+| SEC-HAZ-054 | T-205 | Legitimate glucose publish | T | Clinical data | Clinical data at Legitimate glucose publish can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
+| SEC-HAZ-055 | T-206 | Legitimate glucose publish | D | Clinical data | Clinical data from Legitimate glucose publish may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
+| SEC-HAZ-056 | T-207 | Legitimate glucose publish | T | Alarms | Alarm conditions or thresholds at Legitimate glucose publish can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
+| SEC-HAZ-057 | T-208 | Legitimate glucose publish | D | Alarms | Alarm delivery through Legitimate glucose publish can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001 |
+| SEC-HAZ-058 | T-218 | Forged-reading injection | T | Device control | Therapy parameters handled by Forged-reading injection can be altered without detection -> The patient receives an over-dose, under-dose or wrong therapy while the display and records show the intended value. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
+| SEC-HAZ-059 | T-219 | Forged-reading injection | D | Device control | Loss of Forged-reading injection removes control of therapy -> Therapy is interrupted, continues when it should have been stopped, or cannot be titrated while the patient deteriorates. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
+| SEC-HAZ-060 | T-220 | Forged-reading injection | T | Alarms | Alarm conditions or thresholds at Forged-reading injection can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
+| SEC-HAZ-061 | T-221 | Forged-reading injection | D | Alarms | Alarm delivery through Forged-reading injection can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
+| SEC-HAZ-062 | T-222 | Forged-reading injection | T | Clinical data | Clinical data at Forged-reading injection can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
+| SEC-HAZ-063 | T-223 | Forged-reading injection | D | Clinical data | Clinical data from Forged-reading injection may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-001, RC-011, RC-012 |
+| SEC-HAZ-064 | T-227 | Bedside display feed | T | Alarms | Alarm conditions or thresholds at Bedside display feed can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-065 | T-228 | Bedside display feed | D | Alarms | Alarm delivery through Bedside display feed can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-066 | T-229 | Bedside display feed | T | Clinical data | Clinical data at Bedside display feed can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-067 | T-230 | Bedside display feed | D | Clinical data | Clinical data from Bedside display feed may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-008 |
+| SEC-HAZ-068 | T-237 | BLE advertisement (RF) | T | Clinical data | Clinical data at BLE advertisement (RF) can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-007 |
+| SEC-HAZ-069 | T-238 | BLE advertisement (RF) | D | Clinical data | Clinical data from BLE advertisement (RF) may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Minor — temporary injury, no professional intervention | CRITICAL | SEC-HAZ-007 |
+| SEC-HAZ-070 | T-275 | Touch input / rendered display | T | Alarms | Alarm conditions or thresholds at Touch input / rendered display can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-071 | T-276 | Touch input / rendered display | D | Alarms | Alarm delivery through Touch input / rendered display can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-072 | T-277 | Touch input / rendered display | T | Clinical data | Clinical data at Touch input / rendered display can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-073 | T-278 | Touch input / rendered display | D | Clinical data | Clinical data from Touch input / rendered display may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-074 | T-286 | Bedside annunciation | T | Alarms | Alarm conditions or thresholds at Bedside annunciation can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-075 | T-287 | Bedside annunciation | D | Alarms | Alarm delivery through Bedside annunciation can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-076 | T-288 | Bedside annunciation | T | Clinical data | Clinical data at Bedside annunciation can be altered or substituted -> A clinician diagnoses or treats on wrong data: missed condition, unnecessary treatment, or the right treatment given to the wrong patient. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-077 | T-289 | Bedside annunciation | D | Clinical data | Clinical data from Bedside annunciation may be unavailable when a decision has to be made -> Treatment is delayed, or a decision is made without information that was available yesterday. | Critical — permanent impairment or life-threatening injury | CRITICAL | SEC-HAZ-012 |
+| SEC-HAZ-078 | T-293 | Paired HID input | T | Alarms | Alarm conditions or thresholds at Paired HID input can be tampered with -> A genuine deteriorating-patient alarm never reaches anyone, or false alarms are injected — driving alarm fatigue, desensitisation and unnecessary intervention. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-079 | T-294 | Paired HID input | D | Alarms | Alarm delivery through Paired HID input can be blocked, delayed or flooded -> Deterioration goes unnoticed because nobody was alerted in time, or the alert that mattered was lost among false ones. | Serious — injury needing professional intervention | CRITICAL | SEC-HAZ-011 |
+| SEC-HAZ-080 | T-295 | Paired HID input | D | Care delivery | Loss of Paired HID input delays or prevents care -> Treatment is delayed or diverted; in a time-critical pathway that delay is itself the harm. | Serious — injury needing professional intervention | HIGH | SEC-HAZ-011 |
 
 ### 5.1 Safety-relevant elements with no threat raised
 
@@ -3203,6 +4896,7 @@ Record these in the safety file as justified residual risks.
 | Root filesystem / sudoers (/etc/sudoers.d, /root) | Data store | Patient safety impact has not been assessed for this element. |
 | Patient glucose data / PHI | Asset | Patient safety impact has not been assessed for this element. |
 | Device & broker credentials | Asset | Patient safety impact has not been assessed for this element. |
+| Visitor at the bedside | Entity | Patient safety impact has not been assessed for this element. |
 | HTTP attack surface | Data flow | Patient safety impact has not been assessed for this element. |
 | Login query | Data flow | Patient safety impact has not been assessed for this element. |
 | Diagnostic export / config read | Data flow | Patient safety impact has not been assessed for this element. |
@@ -3211,6 +4905,12 @@ Record these in the safety file as justified residual risks.
 | Rogue HL7 query | Data flow | Patient safety impact has not been assessed for this element. |
 | SSH foothold | Data flow | Patient safety impact has not been assessed for this element. |
 | Privilege escalation | Data flow | Patient safety impact has not been assessed for this element. |
+| USB port access | Data flow | Patient safety impact has not been assessed for this element. |
+| Bluetooth pairing / GATT access | Data flow | Patient safety impact has not been assessed for this element. |
+| Unattended panel use | Data flow | Patient safety impact has not been assessed for this element. |
+| Removable-media config copy | Data flow | Patient safety impact has not been assessed for this element. |
+| Auto-mount + udev rule execution | Data flow | Patient safety impact has not been assessed for this element. |
+| HCI advertising control | Data flow | Patient safety impact has not been assessed for this element. |
 
 ## 6. Coverage gaps
 
@@ -3224,6 +4924,7 @@ Record these in the safety file as justified residual risks.
 | Root filesystem / sudoers (/etc/sudoers.d, /root) | Data store | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
 | Patient glucose data / PHI | Asset | Safety-relevant functions, Worst-case severity of harm, Hazardous situation |
 | Device & broker credentials | Asset | Safety-relevant functions, Worst-case severity of harm, Hazardous situation |
+| Visitor at the bedside | Entity | Safety-relevant functions, Worst-case severity of harm, Hazardous situation |
 | HTTP attack surface | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
 | Console session | Data flow | Software safety class (IEC 62304), Hazardous situation |
 | Bedside interaction | Data flow | Software safety class (IEC 62304), Hazardous situation |
@@ -3239,6 +4940,15 @@ Record these in the safety file as justified residual risks.
 | Rogue HL7 query | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
 | SSH foothold | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
 | Privilege escalation | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
+| USB port access | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
+| Bluetooth pairing / GATT access | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
+| Unattended panel use | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
+| Touch input / rendered display | Data flow | Hazardous situation |
+| Bedside annunciation | Data flow | Hazardous situation |
+| Paired HID input | Data flow | Hazardous situation |
+| Removable-media config copy | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
+| Auto-mount + udev rule execution | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
+| HCI advertising control | Data flow | Safety-relevant functions, Worst-case severity of harm, Software safety class (IEC 62304), Hazardous situation |
 
 ## Appendix A · STRIDE reference
 
