@@ -34,9 +34,44 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Checkboxes and focus rings pick up the app accent instead of each
-   browser's own blue. */
+/* Checkboxes: drawn by the app, not by the browser. Safari renders a rounded
+   native macOS box and Gecko a square one of a different size, so the panels
+   only line up if we own the control. */
 :root { accent-color: var(--accent); }
+
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  display: inline-grid;
+  place-content: center;
+  vertical-align: -3px;
+  background: #fff;
+  border: 1px solid #b7c0d0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+input[type="checkbox"]::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  transform: scale(0);
+  transition: transform .08s ease-out;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+input[type="checkbox"]:hover { border-color: #8fa6d6; }
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent-dark);
+}
+input[type="checkbox"]:checked::before { transform: scale(1); }
+input[type="checkbox"]:disabled { background: #eef1f6; border-color: var(--line); cursor: default; }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Firefox shows a permanent gutter scrollbar where WebKit uses an overlay;
    make both thin and unobtrusive. */
@@ -96,6 +131,8 @@ button::-moz-focus-inner { border: 0; padding: 0; }
 .sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
 
 .btn {
+  appearance: none;
+  -webkit-appearance: none;
   padding: 6px 11px;
   font: inherit;
   font-size: 13px;
@@ -136,6 +173,8 @@ button::-moz-focus-inner { border: 0; padding: 0; }
 .hint { font-size: 11px; color: var(--ink-soft); margin: 0 0 10px; line-height: 1.4; }
 
 .tool {
+  appearance: none;
+  -webkit-appearance: none;
   display: flex;
   align-items: center;
   gap: 9px;
