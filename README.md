@@ -418,30 +418,6 @@ The CGM lab is kept in two places on purpose: as data in `js/examples.js` so the
 works from `file://` with no server, and as `examples/cgm-lab.json` so it can be opened,
 saved and diffed as a file. Change one and change the other.
 
-## Standards this lines up with
-
-The safety layer follows what the medical device standards and guidance ask for, without
-claiming to be a compliance tool:
-
-- **ISO 14971** — security threats with a path to patient harm belong in the safety risk
-  management file as hazardous situations, with the same severity scale.
-- **IEC 62304** — each software item's safety class is recorded per element.
-- **IEC 81001-5-1 / MDCG 2019-16** — threat modelling in the security development life
-  cycle, with security risk management integrated with safety risk management.
-- **FDA premarket cybersecurity guidance (2023) / §524B** — exploitability *and* impact on
-  patient safety assessed together, with traceability from each threat to a control and its
-  verification evidence.
-
-The report gives you the threat model, the hazard references and the trace. Deciding
-acceptability, and doing the verification, stays with your risk management process.
-
-### Teaching sessions to add
-
-The scoring profile and CVSS features open up two more exercises worth 20 minutes each:
-have the group write a profile that reflects how their organisation actually escalates
-things, or take the three worst findings and score them properly in the NVD calculator,
-then compare the CVSS band against the modelled rating and work out which one is telling
-the truth.
 
 ## Browser support
 
