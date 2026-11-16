@@ -138,6 +138,20 @@ window.TM = window.TM || {};
     return TM.safetyFunctionsOf(el).length > 0;
   };
 
+  /** The security use cases an element is tagged with, as a clean list. */
+  TM.useCasesOf = function (el) {
+    var raw = String((el && el.props && el.props.useCases) || '');
+    var seen = {}, out = [];
+    raw.split(/[,;\n]/).forEach(function (part) {
+      var name = part.trim().replace(/\s+/g, ' ');
+      var k = name.toLowerCase();
+      if (!name || seen[k]) return;
+      seen[k] = true;
+      out.push(name);
+    });
+    return out;
+  };
+
   /** ISO 14971-style severity of harm, least to most severe. */
   TM.HARM_SEVERITY = [
     'None (no patient harm credible)',
@@ -157,6 +171,82 @@ window.TM = window.TM || {};
     'Critical — permanent impairment or life-threatening injury': 1.5,
     'Catastrophic — patient death': 2
   };
+
+  /* ---------------------------------------------------------------------
+   * FDA premarket cybersecurity guidance
+   *
+   * "Cybersecurity in Medical Devices: Quality Management System
+   * Considerations and Content of Premarket Submissions" (February 2026).
+   * These tables are the vocabulary the report uses to show how a model
+   * lines up with it. Section numbers are the guidance's own.
+   * ------------------------------------------------------------------- */
+  TM.FDA = {
+    TITLE: 'Cybersecurity in Medical Devices: Quality Management System Considerations and Content of Premarket Submissions',
+    ISSUED: 'February 2026',
+
+    /* Section IV.B - what the design has to provide. */
+    OBJECTIVES: [
+      { key: 'authenticity', label: 'Authenticity, which includes integrity' },
+      { key: 'authorization', label: 'Authorization' },
+      { key: 'availability', label: 'Availability' },
+      { key: 'confidentiality', label: 'Confidentiality' },
+      { key: 'updatability', label: 'Secure and timely updatability and patchability' }
+    ],
+
+    /* Section V.B.1 and Appendix 1 - the control categories FDA expects
+       requirements, implementation and test evidence for. */
+    CONTROLS: [
+      { key: 'authn', label: 'Authentication', ref: 'Appendix 1.A' },
+      { key: 'authz', label: 'Authorization', ref: 'Appendix 1.B' },
+      { key: 'crypto', label: 'Cryptography', ref: 'Appendix 1.C' },
+      { key: 'integrity', label: 'Code, data and execution integrity', ref: 'Appendix 1.D' },
+      { key: 'confidentiality', label: 'Confidentiality', ref: 'Appendix 1.E' },
+      { key: 'logging', label: 'Event detection and logging', ref: 'Appendix 1.F' },
+      { key: 'resilience', label: 'Resiliency and recovery', ref: 'Appendix 1.G' },
+      { key: 'update', label: 'Firmware and software updates', ref: 'Appendix 1.H' }
+    ],
+
+    /* Section V.A.1 - the parts of the lifecycle a threat model should capture
+       because a safety risk assessment tends to overlook them. */
+    LIFECYCLE: [
+      { key: 'supplyChain', label: 'Supply chain', prompt: 'Third-party and open-source components, build and signing infrastructure, suppliers.' },
+      { key: 'manufacturing', label: 'Manufacturing', prompt: 'Key and credential provisioning, debug and test access, what leaves the factory enabled.' },
+      { key: 'deployment', label: 'Deployment', prompt: 'Installation into the least secure network expected, default configuration and credentials, hardening.' },
+      { key: 'interoperation', label: 'Interoperation', prompt: 'Other devices and accessories, healthcare infrastructure, general-purpose platforms, shared protocols.' },
+      { key: 'maintenance', label: 'Maintenance and update', prompt: 'Patching, servicing, remote support, end of support of the device and of its components.' },
+      { key: 'decommission', label: 'Decommission', prompt: 'Sanitising data and credentials at disposal, resale, return or repair; revoking the device identity.' }
+    ],
+
+    /* Section V.B.2 - the security architecture views. */
+    VIEWS: [
+      { key: 'global', label: 'Global system view', ref: 'V.B.2(a)' },
+      { key: 'multiPatient', label: 'Multi-patient harm view', ref: 'V.B.2(b)' },
+      { key: 'update', label: 'Updatability and patchability view', ref: 'V.B.2(c)' },
+      { key: 'useCase', label: 'Security use case views', ref: 'V.B.2(d)' }
+    ]
+  };
+
+  function byKey(list, key) {
+    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i];
+    return null;
+  }
+  TM.FDA.objective = function (key) { return byKey(TM.FDA.OBJECTIVES, key); };
+  TM.FDA.control = function (key) { return byKey(TM.FDA.CONTROLS, key); };
+  TM.FDA.lifecycle = function (key) { return byKey(TM.FDA.LIFECYCLE, key); };
+
+  /* The network assumption a model is analysed under (section V.A.1). */
+  TM.NETWORK_HOSTILE = 'Hostile — an adversary can alter, drop and replay traffic';
+  TM.NETWORK_TRUSTED = 'Trusted — internal networks are assumed benign';
+  TM.NETWORK_ASSUMPTIONS = [TM.NETWORK_HOSTILE, TM.NETWORK_TRUSTED];
+
+  /** True unless the model explicitly says internal networks are trusted. */
+  TM.assumesHostileNetwork = function (model) {
+    return !(model && model.meta && model.meta.networkAssumption === TM.NETWORK_TRUSTED);
+  };
+
+  /* The scale-of-compromise answers (section V.B.2(b)). */
+  TM.SCOPE_SINGLE = 'Single device / single patient';
+  TM.SCOPE_MULTI = 'Multiple devices or patients at once';
 
   /* ---------------------------------------------------------------------
    * Category catalogue.
@@ -231,13 +321,21 @@ window.TM = window.TM || {};
       appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
     },
 
+    {
+      key: 'harmScope',
+      label: 'Scale of compromise',
+      group: 'Patient safety',
+      help: 'If this element is compromised, is one device and one patient affected, or many at once? Shared servers, update infrastructure, fleet-wide credentials and anything every device talks to are "multiple". Feeds the multi-patient harm view.',
+      options: [UNSET, TM.SCOPE_SINGLE, TM.SCOPE_MULTI],
+      appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
+    },
     /* ---- entity ---- */
     {
       key: 'entityKind',
       label: 'Entity kind',
       group: 'Classification',
       help: 'What sort of actor this is.',
-      options: [UNSET, 'Human user', 'Privileged user / administrator', 'External system', 'Third-party service', 'Device / sensor', 'Internal component'],
+      options: [UNSET, 'Human user', 'Privileged user / administrator', 'External system', 'Third-party service', 'Device / sensor', 'Internal component', 'Other medical device / accessory', 'Healthcare infrastructure (EHR, PACS, network)', 'General-purpose computing platform', 'Manufacturer infrastructure (update / cloud server)'],
       appliesTo: ['entity']
     },
     {
@@ -283,6 +381,47 @@ window.TM = window.TM || {};
       appliesTo: ['process']
     },
 
+    {
+      key: 'softwareOrigin',
+      label: 'Software origin',
+      group: 'Software supply chain and updates',
+      help: 'Who wrote the software this process runs. Third-party and open-source components carry risks the manufacturer inherits and has to track.',
+      options: [UNSET, 'Proprietary (manufacturer-developed)', 'Commercial off-the-shelf', 'Open source', 'Mixed — includes third-party components'],
+      appliesTo: ['process']
+    },
+    {
+      key: 'componentSupport',
+      label: 'Component support status',
+      group: 'Software supply chain and updates',
+      help: 'Whether the software, and the components it is built from, still receive security fixes.',
+      options: [UNSET, 'Actively maintained', 'No longer maintained (end of support)', 'Abandoned / unknown'],
+      appliesTo: ['process']
+    },
+    {
+      key: 'sbomRef',
+      label: 'SBOM reference',
+      group: 'Software supply chain and updates',
+      type: 'text',
+      help: 'The SBOM document and component entries this process traces to (e.g. SBOM-IP-2200 #14-22).',
+      appliesTo: ['process']
+    },
+    {
+      key: 'updateMechanism',
+      label: 'Update mechanism',
+      group: 'Software supply chain and updates',
+      help: 'How this software is patched once the device is in the field.',
+      options: [UNSET, 'Not updatable in the field', 'Unauthenticated (unsigned image, file, USB or service tool)', 'Signed updates, no rollback protection', 'Signed updates with rollback protection'],
+      appliesTo: ['process']
+    },
+    {
+      key: 'keyManagement',
+      label: 'Keys and credentials held',
+      group: 'Controls',
+      help: 'How the secrets this process relies on are provisioned and stored. A secret that is the same on every device turns one compromised device into all of them.',
+      options: [UNSET, 'No keys or credentials held', 'Hardcoded, default or shared across devices', 'Unique per device, stored in software', 'Unique per device, hardware-protected (secure element / TPM / HSM)'],
+      appliesTo: ['process']
+    },
+
     /* ---- data store ---- */
     {
       key: 'storeKind',
@@ -303,7 +442,7 @@ window.TM = window.TM || {};
       key: 'integrity',
       label: 'Integrity controls',
       group: 'Controls',
-      help: 'What stops silent modification of stored data.',
+      help: 'What stops silent modification of stored data. A CRC or plain checksum detects noise, not an attacker.',
       options: [UNSET, 'None', 'Constraints / checksums', 'Signed or immutable (WORM)'],
       appliesTo: ['datastore']
     },
@@ -321,7 +460,36 @@ window.TM = window.TM || {};
       label: 'Protocol',
       group: 'Classification',
       help: 'The transport this flow uses.',
-      options: [UNSET, 'HTTPS / TLS', 'HTTP (cleartext)', 'gRPC over TLS', 'SQL / database protocol', 'AMQP / Kafka / queue', 'SMB / NFS file share', 'SFTP / SSH', 'FTP / Telnet (cleartext)', 'Email / SMTP', 'Physical / manual transfer', 'Other'],
+      options: [UNSET, 'HTTPS / TLS', 'HTTP (cleartext)', 'gRPC over TLS', 'SQL / database protocol', 'AMQP / Kafka / queue', 'MQTT', 'HL7 / DICOM / FHIR', 'SMB / NFS file share', 'SFTP / SSH', 'FTP / Telnet (cleartext)', 'Email / SMTP', 'Bluetooth / BLE', 'NFC / RFID / proprietary RF', 'USB / serial', 'Physical / manual transfer', 'Other'],
+      appliesTo: ['flow']
+    },
+    {
+      key: 'protocolDetail',
+      label: 'Protocol detail',
+      group: 'Classification',
+      type: 'text',
+      help: 'Version, port, channel or frequency, and the cipher or key length where one applies (e.g. TLS 1.3, tcp/8883, ECDHE-P256 + AES-256-GCM).',
+      appliesTo: ['flow']
+    },
+    {
+      key: 'carries',
+      label: 'Carries',
+      group: 'Classification',
+      type: 'multi',
+      help: 'What moves along this path. Code and commands need stronger protection than data: the receiver acts on them.',
+      options: [
+        { value: 'data', label: 'Data', help: 'Measurements, records, telemetry, logs.' },
+        { value: 'code', label: 'Code', help: 'Software, firmware, configuration or scripts the receiver loads or executes.' },
+        { value: 'commands', label: 'Commands', help: 'Instructions that change what the receiver does.' }
+      ],
+      appliesTo: ['flow']
+    },
+    {
+      key: 'interfaceState',
+      label: 'Interface state',
+      group: 'Classification',
+      help: 'Whether this path is part of normal use. Service, debug and dormant interfaces are attack surface too, and are the ones most often forgotten.',
+      options: [UNSET, 'In use for the intended use', 'Service / maintenance only', 'Debug / test interface', 'Built in but unused / dormant'],
       appliesTo: ['flow']
     },
     {
@@ -337,6 +505,14 @@ window.TM = window.TM || {};
       group: 'Controls',
       help: 'What proves the message was not altered in flight.',
       options: [UNSET, 'None', 'Transport (TLS) only', 'Message signature / MAC'],
+      appliesTo: ['flow']
+    },
+    {
+      key: 'replayProtection',
+      label: 'Replay protection',
+      group: 'Controls',
+      help: 'What stops a captured message being sent again later.',
+      options: [UNSET, 'None', 'Timestamp or sequence number', 'Cryptographic nonce / session-bound', 'Not applicable — not a replayable channel'],
       appliesTo: ['flow']
     },
     {
@@ -398,6 +574,16 @@ window.TM = window.TM || {};
       help: 'Evidence available after the fact. Drives the Repudiation analysis.',
       options: [UNSET, 'None', 'Errors only', 'Security events logged', 'Full audit trail, tamper-evident'],
       appliesTo: ['entity', 'process', 'datastore', 'flow']
+    },
+
+    /* ---- architecture views ---- */
+    {
+      key: 'useCases',
+      label: 'Security use cases',
+      group: 'Architecture views',
+      type: 'text',
+      help: 'The clinical or operational use cases this element takes part in, comma separated (e.g. Programming, Alarming, Software update). The report builds one security use case view per name.',
+      appliesTo: ['entity', 'process', 'datastore', 'flow', 'asset']
     }
   ];
 
@@ -442,14 +628,25 @@ window.TM = window.TM || {};
         /* The safety risk management file this security analysis feeds. */
         safetyDoc: '',
         safetyDocRef: '',
-        intendedUse: ''
+        intendedUse: '',
+        /* What FDA asks a threat model to state (section V.A.1). */
+        environment: '',
+        assumptions: '',
+        networkAssumption: TM.NETWORK_HOSTILE,
+        methodologyRationale: '',
+        acceptanceCriteria: '',
+        acceptableResidual: '',
+        /* Lifecycle notes, keyed by TM.FDA.LIFECYCLE */
+        lifecycle: {}
       },
       nodes: [],
       flows: [],
       /* null = use the built-in qualitative scale */
       scoring: null,
       /* per-threat CVSS assessments, keyed "<elementId>::<ruleId>" */
-      assessments: {}
+      assessments: {},
+      /* per-threat risk treatment (control, residual risk, evidence), same keys */
+      treatments: {}
     };
   };
 
@@ -579,7 +776,8 @@ window.TM = window.TM || {};
       sensitiveData: 0.5,        /* confidential or regulated data */
       externalExposure: 0.5,     /* internet / anonymous facing, or an external boundary crossing */
       markedAsset: 0.5,          /* the element is flagged as an asset */
-      safetyCriticalDoS: 0.5     /* availability threat against a safety-critical element */
+      safetyCriticalDoS: 0.5,    /* availability threat against a safety-critical element */
+      multiPatientHarm: 0.5      /* a compromise reaches many devices or patients at once */
     },
     mitigatorPoints: {
       publicData: 0.5,
@@ -591,7 +789,7 @@ window.TM = window.TM || {};
   };
   TM.DEFAULT_SCORING.harmSeverityPoints = TM.HARM_SEVERITY_POINTS;
 
-  var AGGRAVATORS = ['patientSafety', 'sensitiveData', 'externalExposure', 'markedAsset', 'safetyCriticalDoS'];
+  var AGGRAVATORS = ['patientSafety', 'sensitiveData', 'externalExposure', 'markedAsset', 'safetyCriticalDoS', 'multiPatientHarm'];
   var MITIGATORS = ['publicData', 'lowAvailabilityNeed'];
 
   function isNum(v) { return typeof v === 'number' && isFinite(v); }
@@ -873,6 +1071,75 @@ window.TM = window.TM || {};
     }
   };
 
+  /* ---------------------------------------------------------------------
+   * Risk treatment
+   *
+   * The engine rates a threat as it stands on the diagram: the pre-mitigation
+   * risk. A treatment records what was decided about it - the control, the
+   * residual (post-mitigation) risk, the reasoning and the evidence - which is
+   * what a cybersecurity risk assessment has to show (FDA section V.A.2).
+   * ------------------------------------------------------------------- */
+  TM.TREATMENT_OPEN = 'Open';
+  TM.TREATMENT_STATUSES = [
+    { label: 'Mitigated by design', needs: 'control' },
+    { label: 'Mitigated by compensating control', needs: 'control' },
+    { label: 'Transferred to the user (disclosed in labeling)', needs: 'rationale' },
+    { label: 'Accepted', needs: 'rationale' },
+    { label: 'Not applicable', needs: 'rationale' }
+  ];
+
+  TM.treatmentStatus = function (label) {
+    for (var i = 0; i < TM.TREATMENT_STATUSES.length; i++) {
+      if (TM.TREATMENT_STATUSES[i].label === label) return TM.TREATMENT_STATUSES[i];
+    }
+    return null;
+  };
+
+  /**
+   * Validate a user-entered treatment.
+   * @param levels the severity level labels of the scoring profile in force
+   * @returns {{ok: boolean, treatment: Object|null, errors: string[]}}
+   */
+  TM.makeTreatment = function (raw, levels) {
+    raw = raw || {};
+    var errors = [];
+    var status = TM.treatmentStatus(String(raw.status || '').trim());
+    var control = String(raw.control || '').trim();
+    var rationale = String(raw.rationale || '').trim();
+    var evidence = String(raw.evidence || '').trim();
+    var residual = String(raw.residual || '').trim();
+
+    if (!status) {
+      errors.push('Choose what was decided about this threat.');
+    } else {
+      if (status.needs === 'control' && !control) {
+        errors.push('Name the control or security requirement that mitigates it.');
+      }
+      if (status.needs === 'rationale' && !rationale) {
+        errors.push('Give the rationale: "' + status.label + '" is a decision somebody has to be able to defend.');
+      }
+      if (status.label !== 'Not applicable' && !residual) {
+        errors.push('Rate the residual risk that remains after this decision.');
+      }
+    }
+    if (residual && levels && levels.indexOf(residual) === -1) {
+      errors.push('"' + residual + '" is not a level of the severity scale in force.');
+    }
+    if (errors.length) return { ok: false, treatment: null, errors: errors };
+    return {
+      ok: true,
+      errors: [],
+      treatment: {
+        status: status.label,
+        control: control,
+        residual: status.label === 'Not applicable' ? '' : residual,
+        rationale: rationale,
+        evidence: evidence,
+        updated: new Date().toISOString().slice(0, 10)
+      }
+    };
+  };
+
   /** Key under which a threat's CVSS assessment is stored. */
   TM.assessmentKey = function (elementId, ruleId) {
     return elementId + '::' + ruleId;
@@ -894,6 +1161,10 @@ window.TM = window.TM || {};
     }
     var model = TM.emptyModel();
     model.meta = Object.assign(model.meta, raw.meta || {});
+    if (TM.NETWORK_ASSUMPTIONS.indexOf(model.meta.networkAssumption) === -1) {
+      model.meta.networkAssumption = TM.NETWORK_HOSTILE;
+    }
+    if (!model.meta.lifecycle || typeof model.meta.lifecycle !== 'object') model.meta.lifecycle = {};
 
     if (raw.scoring) {
       var checked = TM.validateScoring(raw.scoring);
@@ -910,6 +1181,20 @@ window.TM = window.TM || {};
           made.assessment.updated = str(a.updated) || made.assessment.updated;
           model.assessments[key] = made.assessment;
         }
+      });
+    }
+    if (raw.treatments && typeof raw.treatments === 'object') {
+      Object.keys(raw.treatments).forEach(function (key) {
+        var t = raw.treatments[key];
+        if (!t || typeof t !== 'object' || !TM.treatmentStatus(t.status)) return;
+        /* Kept as written: a residual level that a later change of scoring
+           profile no longer defines is still the decision that was recorded. */
+        model.treatments[key] = {
+          status: t.status,
+          control: str(t.control), residual: str(t.residual),
+          rationale: str(t.rationale), evidence: str(t.evidence),
+          updated: str(t.updated)
+        };
       });
     }
     model.nodes = raw.nodes.filter(function (n) {

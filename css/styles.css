@@ -576,6 +576,18 @@ button::-moz-focus-inner { border: 0; padding: 0; }
   font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px;
 }
 .cvss-form input.cvss-score { flex: 0 0 84px; min-width: 68px; font-family: var(--font); }
+.cvss-form input.plain { font-family: var(--font); font-size: 12px; }
+.cvss-form select {
+  flex: 1 1 200px; min-width: 150px; padding: 5px 8px; font: inherit; font-size: 12px;
+  border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink);
+}
+.cvss-current > div { margin-top: 2px; }
+
+/* ----------------------- FDA alignment in the report ----------------------- */
+.fda-tags { font-size: 11.5px; margin-top: 3px; }
+.doc-ok { color: #1f5c36; font-weight: 600; }
+.doc-partial { color: #96520a; font-weight: 600; }
+.doc-missing { color: var(--danger); font-weight: 600; }
 .cvss-form .cvss-help { font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
 .cvss-form .cvss-error { font-size: 11.5px; color: var(--danger); margin-top: 5px; }
 .cvss-current { font-size: 11.5px; margin-top: 4px; }

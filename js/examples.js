@@ -49,7 +49,36 @@
         'the hospital gateway, the drug library service and the vendor telemetry cloud. Out of scope: the EHR itself, ' +
         'hospital network infrastructure, and physical security of the ward.',
       safetyDoc: 'Infusion Pump Risk Management File (ISO 14971)',
-      safetyDocRef: 'RMF-IP-2200 rev C'
+      safetyDocRef: 'RMF-IP-2200 rev C',
+      /* What FDA asks a threat model to state: environment, assumptions,
+         why this method, how risk is accepted, and the lifecycle. */
+      environment: 'Acute-care wards and intensive care. The pump joins the hospital\'s clinical Wi-Fi alongside ' +
+        'other vendors\' devices and general IT. The hospital runs that network, not the manufacturer, and ' +
+        'segmentation cannot be relied on. Pumps move between wards and are within reach of patients and visitors.',
+      networkAssumption: TM.NETWORK_HOSTILE,
+      assumptions: 'The hospital network is hostile. Clinical staff follow the programming workflow but cannot detect ' +
+        'a value altered in transit. The EHR and the nurse call system belong to other manufacturers and are treated ' +
+        'as untrusted peers. A visitor can reach the pump\'s ports unobserved for minutes at a time.',
+      methodologyRationale: 'STRIDE per element on a data flow diagram. The pump\'s cybersecurity risks arise at its ' +
+        'interfaces, and a per-element sweep gives a coverage argument a reviewer can follow and repeat. Each ' +
+        'safety-relevant function is also analysed for the hazard a compromise creates, so the result feeds the ' +
+        'ISO 14971 file. STRIDE does not rank attacker effort, so exploitability is added per threat with CVSS v4.0.',
+      acceptableResidual: 'Medium',
+      acceptanceCriteria: 'Scored before mitigation by the model, and after mitigation by the security and safety ' +
+        'leads together. Residual Medium or below is acceptable. High needs sign-off against clinical benefit. ' +
+        'Critical is not acceptable. Every threat with a path to patient harm is carried into RMF-IP-2200 by its ' +
+        'SEC-HAZ reference.',
+      lifecycle: {
+        supplyChain: 'Pump firmware builds on a commercial RTOS and an open-source TLS library. The hospital gateway ' +
+          'ships on a commercial OS image. One SBOM per release (SBOM-IP-2200).',
+        manufacturing: 'Every pump leaves the factory with the same service password and the same gateway key.',
+        deployment: 'Commissioned by hospital biomed onto the clinical Wi-Fi. Nothing forces the service password to change.',
+        interoperation: 'EHR auto-programming through the hospital gateway, and nurse call integration. Both are ' +
+          'other manufacturers\' systems.',
+        maintenance: 'Firmware and drug libraries come from the vendor fleet service through the hospital gateway, ' +
+          'or are installed locally by a service technician from a file share.'
+        /* decommission: deliberately not considered yet - the report says so */
+      }
     };
 
     function node(type, x, y, w, h, title, description, props, isAsset) {
@@ -321,6 +350,23 @@
       criticality: 'Critical (safety / life)'
     });
 
+    flow(gateway, pumpCtl, 'Firmware and library push', 'Firmware images and drug libraries relayed from the vendor to each pump.', {
+      safetyFunctions: ['control', 'safetyStop'],
+      harmSeverity: 'Catastrophic — patient death',
+      softwareSafetyClass: 'Class C — death or serious injury possible',
+      safetyFileRef: 'HAZ-011',
+      safetyNotes: 'Whatever arrives here becomes the software that drives the pump and the limits that constrain it.',
+      protocol: 'HTTP (cleartext)',
+      encryptionInTransit: 'None (cleartext)',
+      flowIntegrity: 'None',
+      throttling: 'None',
+      authentication: 'Shared secret or API key',
+      authorization: 'Shared credential for everyone',
+      logging: 'Errors only',
+      dataClassification: 'Internal',
+      criticality: 'Critical (safety / life)'
+    });
+
     flow(pumpCtl, interlock, 'Requested rate check', 'Every programmed rate is checked against the hard limits.', {
       safetyFunctions: ['safetyStop'],
       harmSeverity: 'Catastrophic — patient death',
@@ -454,7 +500,165 @@
       criticality: 'Critical (safety / life)'
     });
 
+    /* ---- FDA premarket categories -------------------------------------
+     * Scale of compromise and security use cases for every element; origin,
+     * support, SBOM, update mechanism and keys for software; what each path
+     * carries and whether it can be replayed. Kept apart from the security
+     * controls above so the two layers can be read separately.
+     * ----------------------------------------------------------------- */
+    var ONE = TM.SCOPE_SINGLE, MANY = TM.SCOPE_MULTI;
+    var FIRMWARE = 'SBOM-IP-2200 §1 (pump firmware)';
+    var UNSIGNED = 'Unauthenticated (unsigned image, file, USB or service tool)';
+    var NO_REPLAY = 'Not applicable — not a replayable channel';
+    var IN_USE = 'In use for the intended use';
+
+    annotate(m, {
+      'Pump controller': {
+        harmScope: ONE, useCases: 'Programming, Delivering therapy, Software update',
+        softwareOrigin: 'Mixed — includes third-party components', componentSupport: 'Actively maintained',
+        sbomRef: FIRMWARE, updateMechanism: UNSIGNED,
+        keyManagement: 'Hardcoded, default or shared across devices'
+      },
+      'Dose limit interlock': {
+        harmScope: ONE, useCases: 'Delivering therapy, Drug library update',
+        softwareOrigin: 'Proprietary (manufacturer-developed)', componentSupport: 'Actively maintained',
+        sbomRef: FIRMWARE, updateMechanism: UNSIGNED, keyManagement: 'No keys or credentials held'
+      },
+      'Alarm manager': {
+        harmScope: ONE, useCases: 'Alarming',
+        softwareOrigin: 'Proprietary (manufacturer-developed)', componentSupport: 'Actively maintained',
+        sbomRef: FIRMWARE, updateMechanism: UNSIGNED,
+        keyManagement: 'Hardcoded, default or shared across devices'
+      },
+      'Hospital gateway': {
+        harmScope: MANY, useCases: 'Programming, Alarming, Software update, Telemetry',
+        softwareOrigin: 'Mixed — includes third-party components',
+        componentSupport: 'No longer maintained (end of support)',
+        updateMechanism: 'Signed updates, no rollback protection',
+        keyManagement: 'Unique per device, stored in software'
+      },
+      /* A hospital system: the manufacturer cannot say how it is updated or
+         keyed, and the report lists those as open questions. */
+      'Nurse call system': {
+        harmScope: MANY, useCases: 'Alarming',
+        softwareOrigin: 'Commercial off-the-shelf', componentSupport: 'Actively maintained',
+        sbomRef: 'Not part of the device (hospital system)'
+      },
+      'Vendor fleet service': {
+        harmScope: MANY, useCases: 'Software update, Drug library update, Telemetry',
+        softwareOrigin: 'Mixed — includes third-party components', componentSupport: 'Actively maintained',
+        sbomRef: 'SBOM-FLEET-12', updateMechanism: 'Signed updates with rollback protection',
+        keyManagement: 'Unique per device, stored in software'
+      },
+      'Drug library (on device)': { harmScope: ONE, useCases: 'Delivering therapy, Drug library update' },
+      'Telemetry & event store': { harmScope: MANY, useCases: 'Telemetry' },
+      'Nurse (bedside)': { harmScope: ONE, useCases: 'Programming, Alarming' },
+      'Biomed / service tech': { harmScope: MANY, useCases: 'Drug library update, Software update' },
+      'Patient': { harmScope: ONE, useCases: 'Delivering therapy' },
+
+      'Programme infusion': {
+        harmScope: ONE, useCases: 'Programming', carries: ['commands'], interfaceState: IN_USE,
+        replayProtection: NO_REPLAY, protocolDetail: 'Front-panel keypad and touchscreen'
+      },
+      'Auto-programming order': {
+        harmScope: MANY, useCases: 'Programming', carries: ['commands'], interfaceState: IN_USE,
+        replayProtection: 'None', protocolDetail: 'HTTP/1.1, tcp/8080, JSON order'
+      },
+      'Firmware and library push': {
+        harmScope: MANY, useCases: 'Software update, Drug library update', carries: ['code'], interfaceState: IN_USE,
+        replayProtection: 'None', protocolDetail: 'HTTP/1.1, tcp/8080, image pulled on notification'
+      },
+      'Requested rate check': {
+        harmScope: ONE, useCases: 'Delivering therapy', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: NO_REPLAY, protocolDetail: 'In-process call'
+      },
+      'Dose limits': {
+        harmScope: ONE, useCases: 'Delivering therapy', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: NO_REPLAY, protocolDetail: 'File read at start-up and on change'
+      },
+      'Alarm conditions': {
+        harmScope: ONE, useCases: 'Alarming', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: NO_REPLAY, protocolDetail: 'In-process message queue'
+      },
+      'Remote alarm escalation': {
+        harmScope: ONE, useCases: 'Alarming', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: 'None', protocolDetail: 'HTTP/1.1, tcp/8081'
+      },
+      'Drug library update': {
+        harmScope: ONE, useCases: 'Drug library update', carries: ['code'],
+        interfaceState: 'Service / maintenance only', replayProtection: 'None', protocolDetail: 'SMB 2, tcp/445'
+      },
+      'Drug library & firmware distribution': {
+        harmScope: MANY, useCases: 'Software update, Drug library update', carries: ['code'], interfaceState: IN_USE,
+        replayProtection: 'Timestamp or sequence number', protocolDetail: 'TLS 1.2, tcp/443'
+      },
+      'Device telemetry': {
+        harmScope: MANY, useCases: 'Telemetry', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: 'Timestamp or sequence number', protocolDetail: 'TLS 1.2, tcp/443'
+      },
+      'Store events': {
+        harmScope: MANY, useCases: 'Telemetry', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: 'Timestamp or sequence number', protocolDetail: 'TLS 1.2, tcp/443'
+      },
+      'Bedside annunciation': {
+        harmScope: ONE, useCases: 'Alarming', carries: ['data'], interfaceState: IN_USE,
+        replayProtection: NO_REPLAY, protocolDetail: 'Audible and visual alarm at the pump'
+      }
+    });
+
+    /* ---- risk treatment: a few threats decided, the rest left open ----
+     * Enough to show pre- and post-mitigation risk side by side, a residual
+     * above the acceptance threshold, and a mitigation with no evidence yet.
+     * ----------------------------------------------------------------- */
+    treat(m, 'Pump controller', 'safe-control-s', {
+      status: 'Mitigated by design', residual: 'Medium',
+      control: 'SR-021 therapy commands signed by the gateway and verified at the pump; SR-022 confirmation at the pump for any rate increase',
+      rationale: 'A spoofed command is rejected at the pump. What remains is a compromised gateway signing key.',
+      evidence: 'TC-SEC-041; PT-2026-02 §5.1'
+    });
+    treat(m, 'Dose limit interlock', 'safe-stop-t', {
+      status: 'Mitigated by design', residual: 'High',
+      control: 'SR-030 absolute hard limit in firmware that no drug library entry can widen',
+      rationale: 'Library tampering is bounded by the firmware limit, but soft limits can still be widened until the signed drug library ships in release 2.1.',
+      evidence: ''
+    });
+    treat(m, 'Alarm manager', 'safe-alarm-d', {
+      status: 'Mitigated by compensating control', residual: 'Medium',
+      control: 'Audible and visual annunciation at the pump does not depend on the network path',
+      rationale: 'Remote escalation can still be blocked; the bedside alarm cannot.',
+      evidence: 'TC-ALM-112'
+    });
+    treat(m, 'Hospital gateway', 'proc-e-unsupported', {
+      status: 'Transferred to the user (disclosed in labeling)', residual: 'High',
+      control: '',
+      rationale: 'The gateway OS image is past end of support. Hospitals are told to isolate it on its own VLAN (IFU §9.3) until the 3.0 image ships.',
+      evidence: ''
+    });
+    treat(m, 'Nurse (bedside)', 'ent-r-nolog', {
+      status: 'Accepted', residual: 'Low',
+      control: '',
+      rationale: 'Programming at the bedside is attributed through the ward\'s medication administration record rather than by the pump.',
+      evidence: ''
+    });
+
     return m;
+  }
+
+  /** Merge extra categories into the elements of `model`, looked up by title. */
+  function annotate(model, byTitle) {
+    model.nodes.concat(model.flows).forEach(function (el) {
+      var extra = byTitle[el.title];
+      if (!extra) return;
+      Object.keys(extra).forEach(function (k) { el.props[k] = extra[k]; });
+    });
+  }
+
+  /** Record a risk treatment against one threat, by element title and rule id. */
+  function treat(model, title, ruleId, t) {
+    var el = model.nodes.concat(model.flows).filter(function (e) { return e.title === title; })[0];
+    if (!el) return;
+    t.updated = model.meta.date;
+    model.treatments[TM.assessmentKey(el.id, ruleId)] = t;
   }
 
   /* ---------------------------------------------------------------------
@@ -473,10 +677,23 @@
       "system": "Continuous glucose monitoring appliance: a wearable BLE sensor, an MQTT telemetry backbone, an HL7 clinical interface, and a web + bedside-kiosk console, all on one Raspberry Pi with its USB ports, Bluetooth radio and touchscreen live at the bedside.",
       "author": "SecureMED teaching example (CGM-LAB-INT)",
       "date": "2026-08-29",
-      "intendedUse": "A continuous glucose monitor tracks a patient's interstitial glucose every few minutes and streams it to a display and to the clinical record. Patients and clinicians rely on it for two things: hypo/hyper ALARMS that warn of a dangerous low or high, and the glucose trend used to decide insulin dosing (including automated-delivery loops). A missed low-glucose alarm or a falsely reassuring reading can lead to severe, un-treated hypoglycaemia — seizure, coma or death. This lab is a deliberately vulnerable simulation (GlucoSense CGM-3000) that teaches students to find and fix the flaws that would let an attacker read, forge or suppress that safety-critical data.",
       "scope": "In scope: the appliance's web/kiosk console, HL7 listener, MQTT broker and telemetry, BLE advertiser, on-device config and user store, the host privilege model, and the Pi's physical interfaces — USB host ports, the on-board Bluetooth controller and the bedside touchscreen panel. Out of scope: the physical sensor hardware and adhesive, the upstream hospital EHR/LIS itself, the lab network fabric, and any real patient.",
       "safetyDoc": "CGM-3000 Risk Management File (ISO 14971)",
-      "safetyDocRef": "RMF-CGM-3000 rev A"
+      "safetyDocRef": "RMF-CGM-3000 rev A",
+      "intendedUse": "A continuous glucose monitor tracks a patient's interstitial glucose every few minutes and streams it to a display and to the clinical record. Patients and clinicians rely on it for two things: hypo/hyper ALARMS that warn of a dangerous low or high, and the glucose trend used to decide insulin dosing (including automated-delivery loops). A missed low-glucose alarm or a falsely reassuring reading can lead to severe, un-treated hypoglycaemia — seizure, coma or death. This lab is a deliberately vulnerable simulation (GlucoSense CGM-3000) that teaches students to find and fix the flaws that would let an attacker read, forge or suppress that safety-critical data.",
+      "environment": "A hospital bedside or a patient's home. The appliance sits on whatever network it is given, with its USB ports, Bluetooth radio and touchscreen within reach of anyone at the bedside. In the lab it is on a shared classroom network that every student can reach.",
+      "assumptions": "The network and the radio environment are hostile: any student on the lab network, and anyone within Bluetooth range, is a potential adversary. Nobody watches the bedside continuously. Clinicians act on what the display shows and cannot tell a forged reading from a real one. The Raspberry Pi OS and its packages are as shipped in the lab image.",
+      "networkAssumption": "Hostile — an adversary can alter, drop and replay traffic",
+      "methodologyRationale": "STRIDE per element. The lab's flaws are interface flaws (an unauthenticated broker, a cleartext console, an open HL7 listener) and a per-element sweep finds those systematically. The physical interfaces are drawn as elements so the same method covers them. Findings a student confirms by exploiting them are scored with CVSS v4.0.",
+      "acceptanceCriteria": "Teaching criteria: residual Medium or below is acceptable; High and Critical have to be mitigated before the appliance could be considered for clinical use. Every threat to the alarm path is carried into the hazard analysis by its SEC-HAZ reference.",
+      "acceptableResidual": "Medium",
+      "lifecycle": {
+        "supplyChain": "Raspberry Pi OS, mosquitto, Flask, BlueZ and Chromium are all third-party. The lab image pins old versions on purpose, and there is no SBOM.",
+        "manufacturing": "Every appliance is flashed from one image: the same SSH password, broker credential and web admin account on each.",
+        "deployment": "Dropped onto the hospital or home network as it is. Nothing forces a credential change or closes unused services.",
+        "interoperation": "HL7 v2 over MLLP to the LIS / EHR, MQTT to subscribers, BLE to the sensor.",
+        "maintenance": "Patched by hand over SSH by biomed. There is no update server and nothing is signed."
+      }
     },
     "nodes": [
       {
@@ -541,7 +758,8 @@
           "authentication": "None / anonymous",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Low"
+          "criticality": "Low",
+          "harmScope": "Single device / single patient"
         }
       },
       {
@@ -568,7 +786,9 @@
           ],
           "harmSeverity": "Serious — injury needing professional intervention",
           "safetyFileRef": "SEC-HAZ-004",
-          "safetyNotes": "The clinician doses insulin and responds to lows based on what the console/kiosk shows. Wrong or missing readings and suppressed alarms lead to a wrong or withheld clinical decision."
+          "safetyNotes": "The clinician doses insulin and responds to lows based on what the console/kiosk shows. Wrong or missing readings and suppressed alarms lead to a wrong or withheld clinical decision.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming"
         }
       },
       {
@@ -588,7 +808,9 @@
           "authentication": "None / anonymous",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Multiple devices or patients at once",
+          "useCases": "Reporting results to the EHR"
         }
       },
       {
@@ -619,7 +841,13 @@
           "harmSeverity": "Serious — injury needing professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
           "safetyFileRef": "SEC-HAZ-002, RC-021",
-          "safetyNotes": "The console is where a clinician reads glucose trends and acknowledges alarms; a compromise that alters what it shows biases a dosing decision."
+          "safetyNotes": "The console is where a clinician reads glucose trends and acknowledges alarms; a compromise that alters what it shows biases a dosing decision.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Device administration",
+          "softwareOrigin": "Mixed — includes third-party components",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "Hardcoded, default or shared across devices"
         }
       },
       {
@@ -650,7 +878,13 @@
           "harmSeverity": "Minor — temporary injury, no professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
           "safetyFileRef": "SEC-HAZ-005",
-          "safetyNotes": "Discloses per-patient glucose results and the device serial to any HL7 speaker; wrong or leaked results can misinform a downstream clinical decision."
+          "safetyNotes": "Discloses per-patient glucose results and the device serial to any HL7 speaker; wrong or leaked results can misinform a downstream clinical decision.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Reporting results to the EHR",
+          "softwareOrigin": "Proprietary (manufacturer-developed)",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "No keys or credentials held"
         }
       },
       {
@@ -683,7 +917,13 @@
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "softwareSafetyClass": "Class C — death or serious injury possible",
           "safetyFileRef": "SEC-HAZ-001, RC-011, RC-012",
-          "safetyNotes": "A recovered credential can WRITE glucose/# even though it cannot READ it: a forged 'IN_RANGE' reading masks a true hypoglycaemia, suppresses its alarm, and drives an automated-delivery / dosing decision toward under-treatment."
+          "safetyNotes": "A recovered credential can WRITE glucose/# even though it cannot READ it: a forged 'IN_RANGE' reading masks a true hypoglycaemia, suppresses its alarm, and drives an automated-delivery / dosing decision toward under-treatment.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring, Alarming",
+          "softwareOrigin": "Open source",
+          "componentSupport": "No longer maintained (end of support)",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "Hardcoded, default or shared across devices"
         }
       },
       {
@@ -714,7 +954,13 @@
           "harmSeverity": "Minor — temporary injury, no professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
           "safetyFileRef": "SEC-HAZ-007",
-          "safetyNotes": "Broadcasts patient-linked data over the air. Confidentiality only here, but the process runs as root, so its compromise is a host compromise (CWE-250)."
+          "safetyNotes": "Broadcasts patient-linked data over the air. Confidentiality only here, but the process runs as root, so its compromise is a host compromise (CWE-250).",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring",
+          "softwareOrigin": "Proprietary (manufacturer-developed)",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "No keys or credentials held"
         }
       },
       {
@@ -747,7 +993,13 @@
           "harmSeverity": "Serious — injury needing professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
           "safetyFileRef": "SEC-HAZ-008",
-          "safetyNotes": "The bedside display is a clinician's at-a-glance view of glucose and alarms; if it is unlocked, frozen or shows the wrong patient, a low can be missed at the bedside."
+          "safetyNotes": "The bedside display is a clinician's at-a-glance view of glucose and alarms; if it is unlocked, frozen or shows the wrong patient, a low can be missed at the bedside.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming",
+          "softwareOrigin": "Open source",
+          "componentSupport": "No longer maintained (end of support)",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "No keys or credentials held"
         }
       },
       {
@@ -771,7 +1023,13 @@
           "logging": "Errors only",
           "dataClassification": "Restricted (PII / PHI / PCI)",
           "criticality": "High",
-          "owner": "Platform team"
+          "owner": "Platform team",
+          "harmScope": "Multiple devices or patients at once",
+          "useCases": "Device administration, Software update",
+          "softwareOrigin": "Open source",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "Hardcoded, default or shared across devices"
         }
       },
       {
@@ -795,7 +1053,9 @@
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
           "criticality": "High",
-          "owner": "Device web team"
+          "owner": "Device web team",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration"
         }
       },
       {
@@ -819,7 +1079,9 @@
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
           "criticality": "High",
-          "owner": "Firmware team"
+          "owner": "Firmware team",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration"
         }
       },
       {
@@ -851,7 +1113,9 @@
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "softwareSafetyClass": "Class C — death or serious injury possible",
           "safetyFileRef": "SEC-HAZ-001, RC-011",
-          "safetyNotes": "The reading and alarm state a clinician or automated-delivery loop consumes. If it can be written with no integrity control, a fabricated 'in range' value hides a real low."
+          "safetyNotes": "The reading and alarm state a clinician or automated-delivery loop consumes. If it can be written with no integrity control, a fabricated 'in range' value hides a real low.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring, Alarming"
         }
       },
       {
@@ -875,7 +1139,9 @@
           "logging": "Errors only",
           "dataClassification": "Confidential",
           "criticality": "High",
-          "owner": "Platform team"
+          "owner": "Platform team",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration, Software update"
         }
       },
       {
@@ -902,7 +1168,9 @@
           ],
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "safetyFileRef": "SEC-HAZ-001",
-          "safetyNotes": "Source of truth for glucose and alarms; the value a forged reading has to be told apart from."
+          "safetyNotes": "Source of truth for glucose and alarms; the value a forged reading has to be told apart from.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring"
         }
       },
       {
@@ -920,7 +1188,9 @@
           "assetKind": "Information",
           "dataClassification": "Restricted (PII / PHI / PCI)",
           "criticality": "High",
-          "owner": "Privacy officer"
+          "owner": "Privacy officer",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Reporting results to the EHR"
         }
       },
       {
@@ -945,7 +1215,9 @@
           ],
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "safetyFileRef": "SEC-HAZ-001, RC-012",
-          "safetyNotes": "If a real hypoglycaemia alarm is suppressed (by a forged reading or a frozen display), the last warning before harm is gone."
+          "safetyNotes": "If a real hypoglycaemia alarm is suppressed (by a forged reading or a frozen display), the last warning before harm is gone.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Alarming"
         }
       },
       {
@@ -963,7 +1235,9 @@
           "assetKind": "Credential / secret",
           "dataClassification": "Restricted (PII / PHI / PCI)",
           "criticality": "High",
-          "owner": "Platform team"
+          "owner": "Platform team",
+          "harmScope": "Multiple devices or patients at once",
+          "useCases": "Device administration"
         }
       },
       {
@@ -998,7 +1272,8 @@
           "authentication": "None / anonymous",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Low"
+          "criticality": "Low",
+          "harmScope": "Single device / single patient"
         }
       },
       {
@@ -1030,7 +1305,13 @@
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "softwareSafetyClass": "Class C — death or serious injury possible",
           "safetyFileRef": "SEC-HAZ-010",
-          "safetyNotes": "A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack."
+          "safetyNotes": "A USB device that types (BadUSB HID) is the bedside operator: it can silence alarms, edit thresholds in cgm.conf or kill the kiosk, and because the mount helper runs as root, removable media is also a path to persistent control of the alarm path. Nothing at the bedside tells a charging cable from an attack.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration",
+          "softwareOrigin": "Open source",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "No keys or credentials held"
         }
       },
       {
@@ -1062,7 +1343,13 @@
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "softwareSafetyClass": "Class C — death or serious injury possible",
           "safetyFileRef": "SEC-HAZ-011",
-          "safetyNotes": "A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates."
+          "safetyNotes": "A keyboard paired from the corridor is an unauthenticated console at the bedside, a rogue GATT client can read the patient-linked advertisement, and flooding the controller drops the sensor link — so glucose stops updating and the hypo alarm never annunciates.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring",
+          "softwareOrigin": "Open source",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "Unique per device, stored in software"
         }
       },
       {
@@ -1095,7 +1382,13 @@
           "harmSeverity": "Serious — injury needing professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
           "safetyFileRef": "SEC-HAZ-012",
-          "safetyNotes": "This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay."
+          "safetyNotes": "This panel is where a hypo alarm is seen at the bedside. Left on another screen, frozen, dimmed, unlocked by PIN guessing or driven by an injected input device, the alarm is annunciated to nobody and the low is missed. It also shows the patient's name and readings to whoever is standing in the bay.",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming",
+          "softwareOrigin": "Open source",
+          "componentSupport": "Actively maintained",
+          "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+          "keyManagement": "No keys or credentials held"
         }
       }
     ],
@@ -1119,7 +1412,15 @@
           "authorization": "Simple ownership check",
           "logging": "Errors only",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "High"
+          "criticality": "High",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "data",
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "HTTP/1.1, tcp/5000"
         }
       },
       {
@@ -1146,7 +1447,16 @@
             "clinicalData"
           ],
           "harmSeverity": "Serious — injury needing professional intervention",
-          "safetyFileRef": "SEC-HAZ-002"
+          "safetyFileRef": "SEC-HAZ-002",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Device administration",
+          "carries": [
+            "data",
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "HTTP/1.1, tcp/5000"
         }
       },
       {
@@ -1174,7 +1484,16 @@
             "clinicalData"
           ],
           "harmSeverity": "Serious — injury needing professional intervention",
-          "safetyFileRef": "SEC-HAZ-008"
+          "safetyFileRef": "SEC-HAZ-008",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming",
+          "carries": [
+            "data",
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "HTTP/1.1 on localhost, kiosk browser"
         }
       },
       {
@@ -1188,7 +1507,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "Other",
+          "protocol": "HL7 / DICOM / FHIR",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1201,7 +1520,15 @@
             "clinicalData"
           ],
           "harmSeverity": "Minor — temporary injury, no professional intervention",
-          "safetyFileRef": "SEC-HAZ-005"
+          "safetyFileRef": "SEC-HAZ-005",
+          "harmScope": "Single device / single patient",
+          "useCases": "Reporting results to the EHR",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "HL7 v2 over MLLP, tcp/2575"
         }
       },
       {
@@ -1223,7 +1550,15 @@
           "authorization": "Shared credential for everyone",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "High"
+          "criticality": "High",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "SQLite file access"
         }
       },
       {
@@ -1245,7 +1580,15 @@
           "authorization": "None",
           "logging": "Errors only",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "High"
+          "criticality": "High",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "Service / maintenance only",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "Local file read"
         }
       },
       {
@@ -1259,7 +1602,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "AMQP / Kafka / queue",
+          "protocol": "MQTT",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1267,7 +1610,15 @@
           "authorization": "Simple ownership check",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "High"
+          "criticality": "High",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "MQTT 3.1.1, tcp/1883"
         }
       },
       {
@@ -1281,7 +1632,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "AMQP / Kafka / queue",
+          "protocol": "MQTT",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1295,7 +1646,15 @@
             "alarm"
           ],
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
-          "safetyFileRef": "SEC-HAZ-001"
+          "safetyFileRef": "SEC-HAZ-001",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring, Alarming",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "MQTT 3.1.1, tcp/1883, topic glucose/#"
         }
       },
       {
@@ -1309,7 +1668,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "AMQP / Kafka / queue",
+          "protocol": "MQTT",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1317,7 +1676,15 @@
           "authorization": "Simple ownership check",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Critical (safety / life)"
+          "criticality": "Critical (safety / life)",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring, Alarming",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "Retained messages on glucose/#"
         }
       },
       {
@@ -1331,7 +1698,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "AMQP / Kafka / queue",
+          "protocol": "MQTT",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1346,7 +1713,15 @@
             "clinicalData"
           ],
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
-          "safetyFileRef": "SEC-HAZ-001, RC-011, RC-012"
+          "safetyFileRef": "SEC-HAZ-001, RC-011, RC-012",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "data",
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "MQTT 3.1.1, tcp/1883"
         }
       },
       {
@@ -1360,7 +1735,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "AMQP / Kafka / queue",
+          "protocol": "MQTT",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1374,7 +1749,15 @@
             "clinicalData"
           ],
           "harmSeverity": "Serious — injury needing professional intervention",
-          "safetyFileRef": "SEC-HAZ-008"
+          "safetyFileRef": "SEC-HAZ-008",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "MQTT 3.1.1 subscription"
         }
       },
       {
@@ -1388,7 +1771,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "Other",
+          "protocol": "Bluetooth / BLE",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1401,7 +1784,15 @@
             "clinicalData"
           ],
           "harmSeverity": "Minor — temporary injury, no professional intervention",
-          "safetyFileRef": "SEC-HAZ-007"
+          "safetyFileRef": "SEC-HAZ-007",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "BLE advertising, 2.4 GHz channels 37-39"
         }
       },
       {
@@ -1415,7 +1806,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "Other",
+          "protocol": "HL7 / DICOM / FHIR",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1423,7 +1814,14 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "None",
+          "protocolDetail": "HL7 v2 over MLLP, tcp/2575"
         }
       },
       {
@@ -1445,7 +1843,16 @@
           "authorization": "Simple ownership check",
           "logging": "Errors only",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "High"
+          "criticality": "High",
+          "harmScope": "Multiple devices or patients at once",
+          "useCases": "Device administration, Software update",
+          "carries": [
+            "commands",
+            "code"
+          ],
+          "interfaceState": "Service / maintenance only",
+          "replayProtection": "Cryptographic nonce / session-bound",
+          "protocolDetail": "SSH-2, tcp/22"
         }
       },
       {
@@ -1467,7 +1874,16 @@
           "authorization": "Shared credential for everyone",
           "logging": "Errors only",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "High"
+          "criticality": "High",
+          "harmScope": "Single device / single patient",
+          "useCases": "Device administration, Software update",
+          "carries": [
+            "commands",
+            "code"
+          ],
+          "interfaceState": "Service / maintenance only",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "sudo on the local host"
         }
       },
       {
@@ -1489,7 +1905,15 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "data",
+            "code"
+          ],
+          "interfaceState": "Built in but unused / dormant",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "USB host ports: mass storage and HID"
         }
       },
       {
@@ -1503,7 +1927,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "Other",
+          "protocol": "Bluetooth / BLE",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1511,7 +1935,15 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "data",
+            "commands"
+          ],
+          "interfaceState": "Built in but unused / dormant",
+          "replayProtection": "None",
+          "protocolDetail": "Bluetooth pairing and GATT"
         }
       },
       {
@@ -1533,7 +1965,14 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "Capacitive touch panel"
         }
       },
       {
@@ -1562,7 +2001,16 @@
           ],
           "harmSeverity": "Serious — injury needing professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
-          "safetyFileRef": "SEC-HAZ-012"
+          "safetyFileRef": "SEC-HAZ-012",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming",
+          "carries": [
+            "data",
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "libinput events in, DSI display out"
         }
       },
       {
@@ -1591,7 +2039,15 @@
           ],
           "harmSeverity": "Critical — permanent impairment or life-threatening injury",
           "softwareSafetyClass": "Class B — non-serious injury possible",
-          "safetyFileRef": "SEC-HAZ-012"
+          "safetyFileRef": "SEC-HAZ-012",
+          "harmScope": "Single device / single patient",
+          "useCases": "Viewing glucose data, Alarming",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "Visual display and audible alarm"
         }
       },
       {
@@ -1605,7 +2061,7 @@
         "isAsset": false,
         "existingControls": "",
         "props": {
-          "protocol": "Other",
+          "protocol": "Bluetooth / BLE",
           "encryptionInTransit": "None (cleartext)",
           "flowIntegrity": "None",
           "throttling": "None",
@@ -1620,7 +2076,14 @@
           ],
           "harmSeverity": "Serious — injury needing professional intervention",
           "softwareSafetyClass": "Class B — non-serious injury possible",
-          "safetyFileRef": "SEC-HAZ-011"
+          "safetyFileRef": "SEC-HAZ-011",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "commands"
+          ],
+          "interfaceState": "Built in but unused / dormant",
+          "replayProtection": "None",
+          "protocolDetail": "Bluetooth HID profile"
         }
       },
       {
@@ -1642,7 +2105,14 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "data"
+          ],
+          "interfaceState": "Built in but unused / dormant",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "Mounted mass-storage volume"
         }
       },
       {
@@ -1664,7 +2134,14 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Medium"
+          "criticality": "Medium",
+          "harmScope": "Single device / single patient",
+          "carries": [
+            "code"
+          ],
+          "interfaceState": "Built in but unused / dormant",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "udev rules run on device insertion"
         }
       },
       {
@@ -1686,7 +2163,15 @@
           "authorization": "None",
           "logging": "None",
           "dataClassification": "Restricted (PII / PHI / PCI)",
-          "criticality": "Low"
+          "criticality": "Low",
+          "harmScope": "Single device / single patient",
+          "useCases": "Glucose monitoring",
+          "carries": [
+            "commands"
+          ],
+          "interfaceState": "In use for the intended use",
+          "replayProtection": "Not applicable — not a replayable channel",
+          "protocolDetail": "HCI between advertiser and controller"
         }
       }
     ],
@@ -1704,6 +2189,32 @@
         "score": 8.7,
         "severity": "High",
         "rationale": "With a leaked broker credential, forging a retained 'in range' reading on glucose/# suppresses a genuine hypoglycaemia alarm (integrity + safety impact). Adjacent network, low privilege. Illustrative CVSS v4.0 score.",
+        "updated": "2026-08-29"
+      }
+    },
+    "treatments": {
+      "process-mqtt::safe-alarm-t": {
+        "status": "Mitigated by design",
+        "control": "Broker ACLs and a TLS client certificate per sensor, so only the paired sensor can publish to glucose/#",
+        "residual": "Medium",
+        "rationale": "The lab fix. A forged reading now needs the sensor's private key rather than a shared password.",
+        "evidence": "Lab retest: forged publish to glucose/# rejected",
+        "updated": "2026-08-29"
+      },
+      "process-web::proc-t-input": {
+        "status": "Mitigated by design",
+        "control": "Parameterised queries and allow-list validation on every console input",
+        "residual": "Low",
+        "rationale": "The lab fix for the login and diagnostic injection flaws.",
+        "evidence": "",
+        "updated": "2026-08-29"
+      },
+      "process-host::proc-i-sharedkeys": {
+        "status": "Transferred to the user (disclosed in labeling)",
+        "control": "",
+        "residual": "High",
+        "rationale": "Operators are told to change the SSH password at commissioning. Nothing enforces it, so the risk stays with every site that does not.",
+        "evidence": "",
         "updated": "2026-08-29"
       }
     }

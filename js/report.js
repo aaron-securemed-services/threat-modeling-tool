@@ -45,6 +45,44 @@ window.TM = window.TM || {};
   function dash(v) { return TM.isUnset(v) ? '<span class="muted">not set</span>' : esc(v); }
   function plain(v) { return TM.isUnset(v) ? 'not set' : String(v); }
 
+  /* ---- shared by every output format ---- */
+  var GUIDANCE = 'FDA premarket cybersecurity guidance';
+  var CARRIES = { data: 'Data', code: 'Code', commands: 'Commands' };
+
+  function carriesText(flow) {
+    var v = flow.props && flow.props.carries;
+    if (!Array.isArray(v) || !v.length) return '';
+    return ['data', 'code', 'commands'].filter(function (k) { return v.indexOf(k) !== -1; })
+      .map(function (k) { return CARRIES[k]; }).join(', ');
+  }
+  function lifecycleText(f) {
+    return f.fda.lifecycle.map(function (k) { return TM.FDA.lifecycle(k).label; }).join(', ');
+  }
+  /** "Authenticity · Authentication · Supply chain" for one finding. */
+  function fdaLine(f) {
+    var bits = [TM.FDA.objective(f.fda.objective).label, TM.FDA.control(f.fda.control).label];
+    if (f.fda.lifecycle.length) bits.push('Lifecycle: ' + lifecycleText(f));
+    if (f.multiPatient) bits.push('Multi-patient');
+    return bits.join(' · ');
+  }
+  function residualText(f) {
+    if (f.residual.open) return 'Open';
+    return f.residual.label ? String(f.residual.label).toUpperCase() : 'n/a';
+  }
+  var STATUS_WORD = { ok: 'Stated', partial: 'Partial', missing: 'Missing' };
+
+  /* What a threat model does not contain. Listed so the report is not
+     mistaken for the whole cybersecurity section of a submission. */
+  var OUTSIDE = [
+    ['Software bill of materials', 'V.A.4, VII.C.3', 'A machine-readable SBOM with each component\'s level of support and end-of-support date. The SBOM references in section 7.3 point into it.'],
+    ['Vulnerability assessment', 'V.A.4', 'Known vulnerabilities in the device and its components, including the CISA Known Exploited Vulnerabilities catalogue, each with a safety and security risk assessment.'],
+    ['Unresolved anomalies', 'V.A.5', 'Software anomalies present at submission, assessed for whether a threat could trigger them deliberately.'],
+    ['Cybersecurity testing', 'V.C', 'Security requirement, threat mitigation, vulnerability and penetration test reports. The evidence references in section 8 point into them.'],
+    ['Measures and metrics', 'V.A.6', 'Share of vulnerabilities patched, time from identification to patch, and time from patch to deployment in the field.'],
+    ['Labeling', 'VI.A', 'What users need to configure, operate, update and decommission the device securely, including any risk transferred to them.'],
+    ['Cybersecurity management plan', 'VI.B, VII.C.1', 'How vulnerabilities will be monitored, disclosed and patched after release.']
+  ];
+
   /* ---------------------------------------------------------------------
    * HTML report body
    * ------------------------------------------------------------------- */
@@ -65,9 +103,13 @@ window.TM = window.TM || {};
     if (meta.system) out.push('<dt>System</dt><dd>' + esc(meta.system) + '</dd>');
     if (meta.author) out.push('<dt>Author</dt><dd>' + esc(meta.author) + '</dd>');
     if (meta.date) out.push('<dt>Date</dt><dd>' + esc(meta.date) + '</dd>');
-    if (meta.scope) out.push('<dt>Scope / assumptions</dt><dd>' + esc(meta.scope) + '</dd>');
-    out.push('<dt>Methodology</dt><dd>STRIDE per element (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege)</dd>');
     if (meta.intendedUse) out.push('<dt>Intended use</dt><dd>' + esc(meta.intendedUse) + '</dd>');
+    if (meta.environment) out.push('<dt>Environment of use</dt><dd>' + esc(meta.environment) + '</dd>');
+    if (meta.scope) out.push('<dt>Scope</dt><dd>' + esc(meta.scope) + '</dd>');
+    out.push('<dt>Assumptions</dt><dd>' + esc(networkLine(model)) +
+      (meta.assumptions ? '<br>' + esc(meta.assumptions) : '') + '</dd>');
+    out.push('<dt>Methodology</dt><dd>STRIDE per element (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege)' +
+      (meta.methodologyRationale ? '<br><span class="muted">Rationale:</span> ' + esc(meta.methodologyRationale) : '') + '</dd>');
     if (meta.safetyDoc || meta.safetyDocRef) {
       out.push('<dt>Safety risk management file</dt><dd>' +
         esc(meta.safetyDoc || 'Not named') +
@@ -79,6 +121,11 @@ window.TM = window.TM || {};
         ? ' · ' + a.stats.scored + ' of ' + a.stats.total + ' ' +
           noun(a.stats.total, 'threat', 'threats') + ' scored with CVSS v4.0'
         : '') + '</dd>');
+    if (meta.acceptanceCriteria || a.fda.risk.acceptableKnown) {
+      out.push('<dt>Risk acceptance</dt><dd>' +
+        (a.fda.risk.acceptableKnown ? 'Residual risk up to <b>' + esc(meta.acceptableResidual) + '</b> is acceptable. ' : '') +
+        esc(meta.acceptanceCriteria || '') + '</dd>');
+    }
     out.push('</dl>');
 
     /* ---- summary ---- */
@@ -100,6 +147,13 @@ window.TM = window.TM || {};
       '<th class="num">Total</th></tr></thead><tbody><tr><td>Threats</td>' +
       a.stats.levels.map(function (lv) { return '<td class="num">' + lv.count + '</td>'; }).join('') +
       '<td class="num"><b>' + a.stats.total + '</b></td></tr></tbody></table>');
+
+    if (a.stats.total) {
+      out.push('<p class="muted">Severity is the risk as the design stands on the diagram — pre-mitigation. <b>' +
+        a.stats.treated + '</b> of ' + a.stats.total + ' ' + noun(a.stats.total, 'threat has', 'threats have') +
+        ' a recorded decision and residual risk; <b>' + a.stats.open + '</b> ' +
+        noun(a.stats.open, 'is', 'are') + ' open. Section 8 sets the two side by side.</p>');
+    }
 
     if (a.stats.scored) {
       var profileLabels = a.profile.levels.map(function (lv) { return lv.label; });
@@ -233,6 +287,7 @@ window.TM = window.TM || {};
             sevNote(f.severity) +
             ' <span class="muted">' + esc(TM.STRIDE[f.category].name) + ' — ' + esc(TM.STRIDE[f.category].property) + '</span></div>');
           out.push('<div>' + esc(f.threat) + '</div>');
+          out.push('<div class="fda-tags muted">' + esc(fdaLine(f)) + '</div>');
           if (f.safety) out.push(safetyPanel(f));
           if (f.via) out.push('<div class="muted">Via data flow: ' + esc(f.via) + '</div>');
           if (f.crossings && f.crossings.length) {
@@ -244,6 +299,7 @@ window.TM = window.TM || {};
           out.push('<div class="mitig"><b>Recommended mitigations</b><ul>' +
             f.mitigations.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul></div>');
           out.push(cvssBlock(f, opts.interactive));
+          out.push(treatmentBlock(f, opts.interactive, a.profile));
           out.push('</div>');
         });
       });
@@ -343,6 +399,10 @@ window.TM = window.TM || {};
       out.push('</tbody></table>');
     }
 
+    out.push(viewsHTML(model, a));
+    out.push(riskHTML(model, a));
+    out.push(alignmentHTML(model, a));
+
     /* ---- appendix ---- */
     out.push('<h2>Appendix A · STRIDE reference</h2>');
     out.push('<table><thead><tr><th>Letter</th><th>Threat</th><th>Property violated</th><th>Definition</th>' +
@@ -382,6 +442,7 @@ window.TM = window.TM || {};
       externalExposure: 'Aggravating: internet-facing, anonymous-facing, or crosses an external boundary',
       markedAsset: 'Aggravating: element is marked as an asset',
       safetyCriticalDoS: 'Aggravating: availability threat to a safety-critical element',
+      multiPatientHarm: 'Aggravating: a compromise reaches multiple devices or patients at once',
       publicData: 'Mitigating: data is public',
       lowAvailabilityNeed: 'Mitigating: low availability need'
     };
@@ -425,6 +486,339 @@ window.TM = window.TM || {};
 
     return out.join('\n');
   };
+
+  function networkLine(model) {
+    return TM.assumesHostileNetwork(model)
+      ? 'Networks are assumed hostile: an adversary can alter, drop and replay traffic.'
+      : 'Internal networks are assumed trusted.';
+  }
+  function levelPill(profile, label) {
+    if (!label) return '<span class="muted">n/a</span>';
+    var color = '#7d8ba6';
+    profile.levels.forEach(function (lv) { if (lv.label === label) color = lv.color; });
+    return sevPill({ label: label, color: color });
+  }
+  function elementList(list) {
+    return list.map(function (e) { return esc(e.label); }).join(', ');
+  }
+  function fnChips(keys) {
+    if (!keys || !keys.length) return '<span class="muted">—</span>';
+    return keys.map(function (k) {
+      return '<span class="safety-flag">' + esc(TM.safetyFunction(k).short) + '</span>';
+    }).join(' ');
+  }
+
+  /* ---------------------------------------------------------------------
+   * 7. Security architecture views (FDA section V.B.2, Appendix 2)
+   * ------------------------------------------------------------------- */
+  function viewsHTML(model, a) {
+    var v = a.fda.views;
+    var out = [];
+    out.push('<h2>7. Security architecture views</h2>');
+    out.push('<p class="muted">The ' + GUIDANCE + ' asks for four kinds of view of the security architecture ' +
+      '(section V.B.2), each a diagram with explanatory text. The diagram of this model is the picture for all of them; ' +
+      'the tables below are the text. Where a view does not apply, the submission should say why rather than leave it out.</p>');
+
+    /* ---- global ---- */
+    out.push('<h3>7.1 Global system view</h3>');
+    out.push('<p>The whole medical device system — the device, everything it connects to, and the trust boundaries ' +
+      'between them — is the exported diagram together with the inventory in section 2. Every communication path is ' +
+      'listed here with what it carries and how it is protected.</p>');
+    if (!model.flows.length) {
+      out.push('<p class="muted">No data flows are drawn.</p>');
+    } else {
+      out.push('<table><thead><tr><th>Path</th><th>From → to</th><th>Carries</th><th>Protocol</th><th>Interface</th>' +
+        '<th>Authentication</th><th>Encryption</th><th>Integrity</th><th>Replay protection</th></tr></thead><tbody>');
+      model.flows.forEach(function (f) {
+        var from = TM.nodeById(model, f.from), to = TM.nodeById(model, f.to);
+        var p = f.props || {};
+        out.push('<tr><td><b>' + esc(TM.label(f)) + '</b></td><td>' + esc(TM.label(from)) +
+          (f.bidirectional ? ' ↔ ' : ' → ') + esc(TM.label(to)) + '</td><td>' +
+          (carriesText(f) ? esc(carriesText(f)) : '<span class="muted">not set</span>') + '</td><td>' +
+          dash(p.protocol) + (p.protocolDetail ? '<br><span class="muted">' + esc(p.protocolDetail) + '</span>' : '') +
+          '</td><td>' + dash(p.interfaceState) + '</td><td>' + dash(p.authentication) + '</td><td>' +
+          dash(p.encryptionInTransit) + '</td><td>' + dash(p.flowIntegrity) + '</td><td>' +
+          dash(p.replayProtection) + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+    }
+
+    /* ---- multi-patient ---- */
+    out.push('<h3>7.2 Multi-patient harm view</h3>');
+    out.push('<p>Connectivity means one compromise can reach many devices at once. These are the elements whose ' +
+      'compromise affects more than one device or patient, and the threats raised against them. Each needs an answer to: ' +
+      'how does the system defend against this, and how does it respond when it happens?</p>');
+    if (!v.multiPatient.elements.length) {
+      out.push('<p class="muted">No element is marked as affecting multiple devices or patients. For a connected device ' +
+        'that is rarely true of every element — look again at shared servers, update infrastructure, fleet-wide ' +
+        'credentials and anything on a network other devices share.</p>');
+    } else {
+      out.push('<table><thead><tr><th>Element</th><th>Type</th><th>Safety impact</th><th>Severity of harm</th>' +
+        '<th class="num">Threats</th><th>Controls in place</th></tr></thead><tbody>');
+      v.multiPatient.elements.forEach(function (e) {
+        out.push('<tr><td><b>' + esc(e.label) + '</b></td><td>' + typeLabel(e.type) + '</td><td>' + fnChips(e.safety) +
+          '</td><td>' + dash(e.harmSeverity) + '</td><td class="num">' + e.findings + '</td><td>' +
+          (e.controls ? esc(e.controls) : '<span class="muted">none recorded</span>') + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+      out.push('<p class="muted">' + v.multiPatient.findings.length + ' ' +
+        noun(v.multiPatient.findings.length, 'threat', 'threats') + ' in section 4 ' +
+        noun(v.multiPatient.findings.length, 'is', 'are') + ' marked <em>Multi-patient</em> and weighted accordingly.</p>');
+    }
+    if (v.multiPatient.unanswered.length) {
+      out.push('<p><span class="missing-trace">Scale of compromise not answered:</span> ' +
+        elementList(v.multiPatient.unanswered) + '.</p>');
+    }
+
+    /* ---- update ---- */
+    out.push('<h3>7.3 Updatability and patchability view</h3>');
+    out.push('<p>The end-to-end path by which software reaches the device, including the parts of it the manufacturer ' +
+      'does not control, and how each piece of software is patched.</p>');
+    if (!v.update.modelled) {
+      out.push('<p><span class="missing-trace">No update path is modelled.</span> No data flow is marked as carrying ' +
+        'code and no process states how it is updated. Draw the path from the update source to the device, or record ' +
+        'why the device has none.</p>');
+    }
+    if (v.update.flows.length) {
+      out.push('<table><thead><tr><th>Code-carrying path</th><th>From → to</th><th>Protocol</th><th>Authentication</th>' +
+        '<th>Integrity of the code</th><th>Crosses</th></tr></thead><tbody>');
+      v.update.flows.forEach(function (f) {
+        out.push('<tr><td><b>' + esc(f.label) + '</b></td><td>' + esc(f.from) + ' → ' + esc(f.to) + '</td><td>' +
+          dash(f.protocol) + '</td><td>' + dash(f.authentication) + '</td><td>' + dash(f.integrity) + '</td><td>' +
+          (f.crossings.length ? esc(f.crossings.join(', ')) : '<span class="muted">no boundary</span>') + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+    }
+    if (v.update.processes.length) {
+      out.push('<table><thead><tr><th>Software</th><th>Origin</th><th>Support status</th><th>Update mechanism</th>' +
+        '<th>SBOM reference</th></tr></thead><tbody>');
+      v.update.processes.forEach(function (p) {
+        out.push('<tr><td><b>' + esc(p.label) + '</b></td><td>' + dash(p.origin) + '</td><td>' + dash(p.support) +
+          '</td><td>' + dash(p.mechanism) + '</td><td>' +
+          (p.sbomRef ? esc(p.sbomRef) : '<span class="missing-trace">missing</span>') + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+    }
+    if (v.update.findings.length) {
+      out.push('<p class="muted">Threats to updatability: ' + v.update.findings.map(function (f) {
+        return esc(f.ref);
+      }).join(', ') + ' (section 4).</p>');
+    }
+
+    /* ---- use cases ---- */
+    out.push('<h3>7.4 Security use case views</h3>');
+    out.push('<p>One view per use case through which a compromise could affect safety or effectiveness, covering the ' +
+      'clinical states of the system (programming, alarming, delivering therapy, sending and receiving data) and its ' +
+      'operational ones (power on, standby, update).</p>');
+    if (!v.useCases.length) {
+      out.push('<p><span class="missing-trace">No security use case is defined.</span> Tag each element with the use ' +
+        'cases it takes part in under <em>Architecture views</em> in the properties panel.</p>');
+    } else {
+      out.push('<table><thead><tr><th>Use case</th><th>Elements and paths involved</th><th>Safety impact</th>' +
+        '<th class="num">Threats</th><th class="num">Open</th></tr></thead><tbody>');
+      v.useCases.forEach(function (c) {
+        out.push('<tr><td><b>' + esc(c.name) + '</b></td><td>' + elementList(c.elements) + '</td><td>' +
+          fnChips(c.safety) + '</td><td class="num">' + c.findings.length + '</td><td class="num">' +
+          c.findings.filter(function (f) { return f.residual.open; }).length + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+    }
+    if (v.uncovered.length) {
+      out.push('<p><span class="missing-trace">Safety-relevant, but in no use case:</span> ' +
+        elementList(v.uncovered) + '.</p>');
+    }
+    return out.join('\n');
+  }
+
+  /* ---------------------------------------------------------------------
+   * 8. Cybersecurity risk assessment (FDA section V.A.2)
+   * ------------------------------------------------------------------- */
+  function riskHTML(model, a) {
+    var r = a.fda.risk;
+    var meta = model.meta || {};
+    var out = [];
+    out.push('<h2>8. Cybersecurity risk assessment</h2>');
+    out.push('<p class="muted">The risks and controls identified by the threat model, before and after mitigation. ' +
+      'Pre-mitigation risk is the severity the model computed, or the CVSS v4.0 band where one was entered. The ' +
+      'decision, control, residual risk and evidence are recorded per threat in section 4. Security risk is rated on ' +
+      'exploitability and impact rather than on a probability of occurrence: there is no historical rate for an ' +
+      'attacker, and what a penetration tester can exploit today becomes easier over the life of the device.</p>');
+
+    out.push('<p><b>Acceptance criteria:</b> ' +
+      (r.acceptableKnown
+        ? 'residual risk up to <b>' + esc(r.acceptable) + '</b> is acceptable. '
+        : '<span class="missing-trace">no acceptable level of residual risk is set.</span> ') +
+      esc(meta.acceptanceCriteria || '') + '</p>');
+
+    if (!r.total) {
+      out.push('<p>No threats were raised.</p>');
+      return out.join('\n');
+    }
+
+    out.push('<table><thead><tr><th>Decision</th><th class="num">Threats</th></tr></thead><tbody>');
+    Object.keys(r.byStatus).forEach(function (k) {
+      if (!r.byStatus[k] && k !== TM.TREATMENT_OPEN) return;
+      out.push('<tr><td>' + (k === TM.TREATMENT_OPEN ? '<span class="missing-trace">Open — no decision recorded</span>' : esc(k)) +
+        '</td><td class="num">' + r.byStatus[k] + '</td></tr>');
+    });
+    out.push('</tbody></table>');
+
+    if (r.treated) {
+      var order = a.profile.levels.slice().reverse();
+      out.push('<table><thead><tr><th>Decided threats</th>' + order.map(function (lv) {
+        return '<th class="num"><span class="level-swatch" style="background:' + esc(lv.color) + '"></span>' + esc(lv.label) + '</th>';
+      }).join('') + '</tr></thead><tbody><tr><td>Pre-mitigation</td>' + order.map(function (lv) {
+        return '<td class="num">' + a.findings.filter(function (f) {
+          return !f.residual.open && f.severity.label === lv.label;
+        }).length + '</td>';
+      }).join('') + '</tr><tr><td>Residual</td>' + order.map(function (lv) {
+        return '<td class="num">' + r.residualByLevel[lv.label] + '</td>';
+      }).join('') + '</tr></tbody></table>');
+    }
+
+    if (r.exceeding.length) {
+      out.push('<p><span class="missing-trace">' + r.exceeding.length + ' residual ' +
+        noun(r.exceeding.length, 'risk is', 'risks are') + ' above the acceptance threshold</span> and ' +
+        noun(r.exceeding.length, 'needs', 'need') + ' further control or a documented benefit-risk justification: ' +
+        r.exceeding.map(function (f) { return esc(f.ref); }).join(', ') + '.</p>');
+    }
+    if (r.needsEvidence.length) {
+      out.push('<p><span class="missing-trace">' + r.needsEvidence.length + ' mitigated ' +
+        noun(r.needsEvidence.length, 'threat has', 'threats have') + ' no verification evidence referenced:</span> ' +
+        r.needsEvidence.map(function (f) { return esc(f.ref); }).join(', ') +
+        '. A control counts once testing shows it was implemented and is effective.</p>');
+    }
+
+    out.push('<table><thead><tr><th>Threat</th><th>Element</th><th>Risk</th><th>Pre-mitigation</th><th>Decision</th>' +
+      '<th>Control / rationale</th><th>Residual</th><th>Evidence</th></tr></thead><tbody>');
+    a.findings.forEach(function (f) {
+      var t = f.treatment;
+      out.push('<tr><td><b>' + esc(f.ref) + '</b></td><td>' + esc(f.elementLabel) + '</td><td>' + catTag(f.category) + ' ' +
+        esc(f.title) + '</td><td>' + sevPill(f.severity) + '</td><td>' +
+        (t ? esc(t.status) : '<span class="missing-trace">Open</span>') + '</td><td>' +
+        (t ? [t.control, t.rationale].filter(Boolean).map(esc).join('<br>') : '') + '</td><td>' +
+        (t ? (t.residual ? levelPill(a.profile, t.residual) : '<span class="muted">n/a</span>') +
+          (f.residual.exceeds ? ' <span class="missing-trace">above threshold</span>' : '')
+          : '<span class="muted">as pre-mitigation</span>') + '</td><td>' +
+        (t ? (t.evidence ? esc(t.evidence) : (f.residual.needsEvidence ? '<span class="missing-trace">missing</span>' : '')) : '') +
+        '</td></tr>');
+    });
+    out.push('</tbody></table>');
+    return out.join('\n');
+  }
+
+  /* ---------------------------------------------------------------------
+   * 9. FDA premarket alignment
+   * ------------------------------------------------------------------- */
+  function alignmentHTML(model, a) {
+    var out = [];
+    out.push('<h2>9. FDA premarket alignment</h2>');
+    out.push('<p class="muted">How this threat model lines up with FDA\'s <em>' + esc(TM.FDA.TITLE) + '</em> (' +
+      esc(TM.FDA.ISSUED) + '). Section numbers are the guidance\'s. This is a reading aid for the person assembling a ' +
+      'submission, not a finding of compliance.</p>');
+
+    function tallyTable(title, first, rows, withRef) {
+      out.push('<h3>' + title + '</h3>');
+      out.push('<table><thead><tr><th>' + first + '</th>' + (withRef ? '<th>Guidance</th>' : '') +
+        '<th class="num">Threats</th><th class="num">Open</th></tr></thead><tbody>');
+      rows.forEach(function (r) {
+        out.push('<tr><td>' + esc(r.label) + '</td>' + (withRef ? '<td>' + esc(r.ref) + '</td>' : '') +
+          '<td class="num">' + r.total + '</td><td class="num">' + r.open + '</td></tr>');
+      });
+      out.push('</tbody></table>');
+    }
+    tallyTable('9.1 Security objectives (section IV.B)', 'Objective', a.fda.objectives, false);
+    out.push('<p class="muted">STRIDE has no letter for the fifth objective. Threats to updating and patching the device ' +
+      'are raised under Tampering or Elevation of privilege and counted here under updatability. Repudiation is ' +
+      'counted under authenticity: it is the failure to prove where an action came from.</p>');
+    tallyTable('9.2 Security control categories (section V.B.1, Appendix 1)', 'Control category', a.fda.controls, true);
+    out.push('<p class="muted">A category with no threat raised is not a category with nothing to show: a submission ' +
+      'gives the requirements, the implementation and the test evidence for all eight.</p>');
+
+    out.push('<h3>9.3 Lifecycle coverage (section V.A.1)</h3>');
+    out.push('<table><thead><tr><th>Stage</th><th>What to consider</th><th class="num">Threats</th>' +
+      '<th>Considerations recorded</th></tr></thead><tbody>');
+    a.fda.lifecycle.forEach(function (l) {
+      out.push('<tr><td><b>' + esc(l.label) + '</b></td><td>' + esc(l.prompt) + '</td><td class="num">' + l.total +
+        '</td><td>' + (l.notes ? esc(l.notes)
+          : '<span class="' + (l.total ? 'muted' : 'missing-trace') + '">none recorded</span>') + '</td></tr>');
+    });
+    out.push('</tbody></table>');
+
+    out.push('<h3>9.4 What this model states</h3>');
+    out.push('<table><thead><tr><th>Expected of the threat model</th><th>Guidance</th><th>Status</th><th>Detail</th></tr></thead><tbody>');
+    a.fda.documentation.forEach(function (d) {
+      out.push('<tr><td>' + esc(d.item) + '</td><td>' + esc(d.ref) + '</td><td><span class="doc-' + d.status + '">' +
+        STATUS_WORD[d.status] + '</span></td><td>' + esc(d.detail) + '</td></tr>');
+    });
+    out.push('</tbody></table>');
+
+    out.push('<h3>9.5 What sits outside the threat model</h3>');
+    out.push('<p class="muted">The security risk management report FDA describes contains more than a threat model. ' +
+      'These parts are produced elsewhere and should trace back to this document.</p>');
+    out.push('<table><thead><tr><th>Document</th><th>Guidance</th><th>What it holds</th></tr></thead><tbody>');
+    OUTSIDE.forEach(function (o) {
+      out.push('<tr><td>' + esc(o[0]) + '</td><td>' + esc(o[1]) + '</td><td>' + esc(o[2]) + '</td></tr>');
+    });
+    out.push('</tbody></table>');
+    return out.join('\n');
+  }
+
+  /**
+   * The risk treatment panel for one finding: what was decided, the control,
+   * the residual risk and the evidence. Editable in the app.
+   */
+  function treatmentBlock(f, interactive, profile) {
+    var key = TM.assessmentKey(f.elementId, f.ruleId);
+    var t = f.treatment;
+    var out = ['<div class="cvss-box" data-treat-key="' + esc(key) + '">'];
+
+    if (t) {
+      out.push('<div class="cvss-current"><b>Risk treatment</b> ' + esc(t.status) +
+        (t.residual ? ' · residual ' + levelPill(profile, t.residual) : '') +
+        (f.residual.exceeds ? ' <span class="missing-trace">above the acceptance threshold</span>' : '') +
+        (t.updated ? ' <span class="muted">· recorded ' + esc(t.updated) + '</span>' : '') +
+        (t.control ? '<div><span class="muted">Control:</span> ' + esc(t.control) + '</div>' : '') +
+        (t.rationale ? '<div><span class="muted">Rationale:</span> ' + esc(t.rationale) + '</div>' : '') +
+        (t.evidence
+          ? '<div><span class="muted">Evidence:</span> ' + esc(t.evidence) + '</div>'
+          : (f.residual.needsEvidence ? '<div class="missing-trace">No verification evidence referenced</div>' : '')) +
+        '</div>');
+    } else if (!interactive) {
+      out.push('<div class="cvss-current muted"><b>Risk treatment</b> Open — no decision recorded, so the residual ' +
+        'risk is the pre-mitigation risk.</div>');
+    }
+
+    if (interactive) {
+      out.push('<button type="button" class="cvss-toggle" data-treat-toggle>' +
+        (t ? 'Edit risk treatment' : 'Record a risk treatment') + '</button>');
+      out.push('<div class="cvss-form" data-treat-form>');
+      out.push('<div class="cvss-row"><select data-treat-status aria-label="Decision">' +
+        '<option value="">Decision…</option>' +
+        TM.TREATMENT_STATUSES.map(function (st) {
+          return '<option' + (t && t.status === st.label ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+        }).join('') + '</select>' +
+        '<select data-treat-residual aria-label="Residual risk"><option value="">Residual risk…</option>' +
+        profile.levels.slice().reverse().map(function (lv) {
+          return '<option' + (t && t.residual === lv.label ? ' selected' : '') + '>' + esc(lv.label) + '</option>';
+        }).join('') + '</select>' +
+        '<button type="button" class="btn btn-sm" data-treat-save>Save</button>' +
+        (t ? '<button type="button" class="btn btn-sm btn-danger" data-treat-clear>Remove</button>' : '') +
+        '</div>');
+      out.push('<div class="cvss-row" style="margin-top:6px"><input type="text" class="plain" data-treat-control ' +
+        'placeholder="Control or security requirement (e.g. SR-014 signed commands)" value="' + esc(t ? t.control : '') + '"></div>');
+      out.push('<div class="cvss-row" style="margin-top:6px"><input type="text" class="plain" data-treat-rationale ' +
+        'placeholder="Rationale for the decision and the residual rating" value="' + esc(t ? t.rationale : '') + '"></div>');
+      out.push('<div class="cvss-row" style="margin-top:6px"><input type="text" class="plain" data-treat-evidence ' +
+        'placeholder="Verification evidence (e.g. PT-2026-03 §4.2, TC-SEC-031)" value="' + esc(t ? t.evidence : '') + '"></div>');
+      out.push('<div class="cvss-help">The severity above is the risk before mitigation. Record what was decided, the ' +
+        'control that carries it, the risk that remains, and the test evidence that the control works.</div>');
+      out.push('<div class="cvss-error" data-treat-error hidden></div>');
+      out.push('</div>');
+    }
+    out.push('</div>');
+    return out.join('');
+  }
 
   /** The patient-safety consequence panel shown inside a safety finding. */
   function safetyPanel(f) {
@@ -544,7 +938,9 @@ window.TM = window.TM || {};
     '.level-swatch{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}',
     '.stride-tag,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}',
     '.cvss-current code{background:#f2f5fa;padding:1px 5px;border-radius:3px;font-size:11px}',
-    '.cvss-box{margin-top:7px;padding-top:6px;border-top:1px dashed #d3d9e4;font-size:12.5px}'
+    '.cvss-box{margin-top:7px;padding-top:6px;border-top:1px dashed #d3d9e4;font-size:12.5px}',
+    '.fda-tags{font-size:11.5px;margin-top:3px}',
+    '.doc-ok{color:#1f5c36;font-weight:600}.doc-partial{color:#96520a;font-weight:600}.doc-missing{color:#c62828;font-weight:600}'
   ].join('');
 
   /* ---------------------------------------------------------------------
@@ -560,15 +956,23 @@ window.TM = window.TM || {};
     if (meta.system) L.push('- **System:** ' + meta.system);
     if (meta.author) L.push('- **Author:** ' + meta.author);
     if (meta.date) L.push('- **Date:** ' + meta.date);
-    if (meta.scope) L.push('- **Scope / assumptions:** ' + meta.scope);
     if (meta.intendedUse) L.push('- **Intended use:** ' + meta.intendedUse);
+    if (meta.environment) L.push('- **Environment of use:** ' + meta.environment);
+    if (meta.scope) L.push('- **Scope:** ' + meta.scope);
+    L.push('- **Assumptions:** ' + networkLine(model) + (meta.assumptions ? ' ' + meta.assumptions : ''));
     if (meta.safetyDoc || meta.safetyDocRef) {
       L.push('- **Safety risk management file:** ' + (meta.safetyDoc || 'Not named') +
         (meta.safetyDocRef ? ' (' + meta.safetyDocRef + ')' : ''));
     }
-    L.push('- **Methodology:** STRIDE per element');
+    L.push('- **Methodology:** STRIDE per element' +
+      (meta.methodologyRationale ? '. Rationale: ' + meta.methodologyRationale : ''));
     L.push('- **Severity scale:** ' + a.profile.name +
       (a.stats.scored ? ' (' + a.stats.scored + ' of ' + a.stats.total + ' threats scored with CVSS v4.0)' : ''));
+    if (meta.acceptanceCriteria || a.fda.risk.acceptableKnown) {
+      L.push('- **Risk acceptance:** ' +
+        (a.fda.risk.acceptableKnown ? 'Residual risk up to ' + meta.acceptableResidual + ' is acceptable. ' : '') +
+        (meta.acceptanceCriteria || ''));
+    }
     L.push('');
 
     L.push('## 1. Summary');
@@ -582,6 +986,8 @@ window.TM = window.TM || {};
     L.push('| Threats identified | ' + a.stats.total + ' |');
     L.push('| Threats affecting patient safety | ' + a.stats.safety + ' |');
     L.push('| Safety-relevant elements | ' + a.stats.safetyElements + ' |');
+    L.push('| Threats with a recorded decision and residual risk | ' + a.stats.treated + ' |');
+    L.push('| Threats still open | ' + a.stats.open + ' |');
     L.push('');
     if (a.stats.safety) {
       L.push('| Safety impact | What a compromise does to the patient | Threats |');
@@ -696,6 +1102,8 @@ window.TM = window.TM || {};
           }
           L.push(f.threat);
           L.push('');
+          L.push('_' + fdaLine(f) + '_');
+          L.push('');
           if (f.safety) {
             L.push('> **Patient safety — ' + f.safety.hazardRef + ' · ' + f.safety.fnLabel + '**  ');
             L.push('> **Harm:** ' + f.safety.harm + '  ');
@@ -711,6 +1119,15 @@ window.TM = window.TM || {};
           L.push('**Recommended mitigations:**');
           f.mitigations.forEach(function (m) { L.push('- ' + m); });
           L.push('');
+          if (f.treatment) {
+            var t = f.treatment;
+            L.push('**Risk treatment:** ' + t.status + (t.residual ? ' — residual **' + String(t.residual).toUpperCase() + '**' : '') +
+              (f.residual.exceeds ? ' (above the acceptance threshold)' : '') +
+              (t.control ? ' — Control: ' + t.control : '') +
+              (t.rationale ? ' — Rationale: ' + t.rationale : '') +
+              (t.evidence ? ' — Evidence: ' + t.evidence : (f.residual.needsEvidence ? ' — **no verification evidence referenced**' : '')));
+            L.push('');
+          }
         });
       });
     }
@@ -780,6 +1197,172 @@ window.TM = window.TM || {};
     }
     L.push('');
 
+    /* ---- 7. architecture views ---- */
+    var v = a.fda.views;
+    L.push('## 7. Security architecture views');
+    L.push('');
+    L.push('The four views FDA asks for (section V.B.2). The diagram is the picture for all of them; these tables are the text.');
+    L.push('');
+    L.push('### 7.1 Global system view');
+    L.push('');
+    if (model.flows.length) {
+      L.push('| Path | From -> to | Carries | Protocol | Interface | Authentication | Encryption | Integrity | Replay protection |');
+      L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+      model.flows.forEach(function (f) {
+        var p = f.props || {};
+        L.push('| ' + md(TM.label(f)) + ' | ' + md(TM.label(TM.nodeById(model, f.from))) +
+          (f.bidirectional ? ' <-> ' : ' -> ') + md(TM.label(TM.nodeById(model, f.to))) + ' | ' +
+          (carriesText(f) || 'not set') + ' | ' + md(plain(p.protocol)) +
+          (p.protocolDetail ? ' (' + md(p.protocolDetail) + ')' : '') + ' | ' + md(plain(p.interfaceState)) + ' | ' +
+          md(plain(p.authentication)) + ' | ' + md(plain(p.encryptionInTransit)) + ' | ' +
+          md(plain(p.flowIntegrity)) + ' | ' + md(plain(p.replayProtection)) + ' |');
+      });
+    } else {
+      L.push('No data flows are drawn.');
+    }
+    L.push('');
+    L.push('### 7.2 Multi-patient harm view');
+    L.push('');
+    if (v.multiPatient.elements.length) {
+      L.push('| Element | Type | Safety impact | Severity of harm | Threats | Controls in place |');
+      L.push('| --- | --- | --- | --- | --- | --- |');
+      v.multiPatient.elements.forEach(function (e) {
+        L.push('| ' + md(e.label) + ' | ' + typeLabel(e.type) + ' | ' +
+          (e.safety.map(function (k) { return TM.safetyFunction(k).short; }).join('; ') || '—') + ' | ' +
+          md(plain(e.harmSeverity)) + ' | ' + e.findings + ' | ' + md(e.controls || 'none recorded') + ' |');
+      });
+    } else {
+      L.push('No element is marked as affecting multiple devices or patients at once.');
+    }
+    L.push('');
+    if (v.multiPatient.unanswered.length) {
+      L.push('**Scale of compromise not answered:** ' + v.multiPatient.unanswered.map(function (e) { return e.label; }).join(', ') + '.');
+      L.push('');
+    }
+    L.push('### 7.3 Updatability and patchability view');
+    L.push('');
+    if (!v.update.modelled) {
+      L.push('**No update path is modelled.** No data flow carries code and no process states how it is updated.');
+      L.push('');
+    }
+    if (v.update.flows.length) {
+      L.push('| Code-carrying path | From -> to | Protocol | Authentication | Integrity of the code | Crosses |');
+      L.push('| --- | --- | --- | --- | --- | --- |');
+      v.update.flows.forEach(function (f) {
+        L.push('| ' + md(f.label) + ' | ' + md(f.from) + ' -> ' + md(f.to) + ' | ' + md(plain(f.protocol)) + ' | ' +
+          md(plain(f.authentication)) + ' | ' + md(plain(f.integrity)) + ' | ' + md(f.crossings.join(', ') || 'no boundary') + ' |');
+      });
+      L.push('');
+    }
+    if (v.update.processes.length) {
+      L.push('| Software | Origin | Support status | Update mechanism | SBOM reference |');
+      L.push('| --- | --- | --- | --- | --- |');
+      v.update.processes.forEach(function (p) {
+        L.push('| ' + md(p.label) + ' | ' + md(plain(p.origin)) + ' | ' + md(plain(p.support)) + ' | ' +
+          md(plain(p.mechanism)) + ' | ' + (p.sbomRef ? md(p.sbomRef) : '**missing**') + ' |');
+      });
+      L.push('');
+    }
+    L.push('### 7.4 Security use case views');
+    L.push('');
+    if (v.useCases.length) {
+      L.push('| Use case | Elements and paths involved | Safety impact | Threats | Open |');
+      L.push('| --- | --- | --- | --- | --- |');
+      v.useCases.forEach(function (c) {
+        L.push('| ' + md(c.name) + ' | ' + md(c.elements.map(function (e) { return e.label; }).join(', ')) + ' | ' +
+          (c.safety.map(function (k) { return TM.safetyFunction(k).short; }).join('; ') || '—') + ' | ' +
+          c.findings.length + ' | ' + c.findings.filter(function (f) { return f.residual.open; }).length + ' |');
+      });
+    } else {
+      L.push('**No security use case is defined.**');
+    }
+    L.push('');
+    if (v.uncovered.length) {
+      L.push('**Safety-relevant, but in no use case:** ' + v.uncovered.map(function (e) { return e.label; }).join(', ') + '.');
+      L.push('');
+    }
+
+    /* ---- 8. risk assessment ---- */
+    var r = a.fda.risk;
+    L.push('## 8. Cybersecurity risk assessment');
+    L.push('');
+    L.push('Pre-mitigation risk is the severity the model computed (or the CVSS v4.0 band where one was entered). ' +
+      'Security risk is rated on exploitability and impact, not on a probability of occurrence.');
+    L.push('');
+    L.push('**Acceptance criteria:** ' + (r.acceptableKnown
+      ? 'residual risk up to ' + r.acceptable + ' is acceptable. '
+      : 'no acceptable level of residual risk is set. ') + (meta.acceptanceCriteria || ''));
+    L.push('');
+    if (r.total) {
+      L.push('| Decision | Threats |');
+      L.push('| --- | --- |');
+      Object.keys(r.byStatus).forEach(function (k) {
+        if (!r.byStatus[k] && k !== TM.TREATMENT_OPEN) return;
+        L.push('| ' + (k === TM.TREATMENT_OPEN ? 'Open — no decision recorded' : md(k)) + ' | ' + r.byStatus[k] + ' |');
+      });
+      L.push('');
+      if (r.exceeding.length) {
+        L.push('**Residual risk above the acceptance threshold:** ' + r.exceeding.map(function (f) { return f.ref; }).join(', ') + '.');
+        L.push('');
+      }
+      if (r.needsEvidence.length) {
+        L.push('**Mitigated, but no verification evidence referenced:** ' + r.needsEvidence.map(function (f) { return f.ref; }).join(', ') + '.');
+        L.push('');
+      }
+      L.push('| Threat | Element | Risk | Pre-mitigation | Decision | Control / rationale | Residual | Evidence |');
+      L.push('| --- | --- | --- | --- | --- | --- | --- | --- |');
+      a.findings.forEach(function (f) {
+        var t = f.treatment;
+        L.push('| ' + f.ref + ' | ' + md(f.elementLabel) + ' | [' + f.category + '] ' + md(f.title) + ' | ' +
+          String(f.severity.label).toUpperCase() + ' | ' + (t ? md(t.status) : 'Open') + ' | ' +
+          (t ? md([t.control, t.rationale].filter(Boolean).join(' — ')) : '') + ' | ' +
+          (t ? residualText(f) + (f.residual.exceeds ? ' (above threshold)' : '') : 'as pre-mitigation') + ' | ' +
+          (t ? md(t.evidence || (f.residual.needsEvidence ? '**missing**' : '')) : '') + ' |');
+      });
+      L.push('');
+    }
+
+    /* ---- 9. alignment ---- */
+    L.push('## 9. FDA premarket alignment');
+    L.push('');
+    L.push('How this threat model lines up with FDA\'s "' + TM.FDA.TITLE + '" (' + TM.FDA.ISSUED +
+      '). A reading aid for assembling a submission, not a finding of compliance.');
+    L.push('');
+    L.push('### 9.1 Security objectives (section IV.B)');
+    L.push('');
+    L.push('| Objective | Threats | Open |');
+    L.push('| --- | --- | --- |');
+    a.fda.objectives.forEach(function (o) { L.push('| ' + o.label + ' | ' + o.total + ' | ' + o.open + ' |'); });
+    L.push('');
+    L.push('### 9.2 Security control categories (section V.B.1, Appendix 1)');
+    L.push('');
+    L.push('| Control category | Guidance | Threats | Open |');
+    L.push('| --- | --- | --- | --- |');
+    a.fda.controls.forEach(function (o) { L.push('| ' + o.label + ' | ' + o.ref + ' | ' + o.total + ' | ' + o.open + ' |'); });
+    L.push('');
+    L.push('### 9.3 Lifecycle coverage (section V.A.1)');
+    L.push('');
+    L.push('| Stage | Threats | Considerations recorded |');
+    L.push('| --- | --- | --- |');
+    a.fda.lifecycle.forEach(function (l) {
+      L.push('| ' + l.label + ' | ' + l.total + ' | ' + md(l.notes || 'none recorded') + ' |');
+    });
+    L.push('');
+    L.push('### 9.4 What this model states');
+    L.push('');
+    L.push('| Expected of the threat model | Guidance | Status | Detail |');
+    L.push('| --- | --- | --- | --- |');
+    a.fda.documentation.forEach(function (d) {
+      L.push('| ' + md(d.item) + ' | ' + d.ref + ' | ' + STATUS_WORD[d.status] + ' | ' + md(d.detail) + ' |');
+    });
+    L.push('');
+    L.push('### 9.5 What sits outside the threat model');
+    L.push('');
+    L.push('| Document | Guidance | What it holds |');
+    L.push('| --- | --- | --- |');
+    OUTSIDE.forEach(function (o) { L.push('| ' + o[0] + ' | ' + o[1] + ' | ' + md(o[2]) + ' |'); });
+    L.push('');
+
     L.push('## Appendix A · STRIDE reference');
     L.push('');
     L.push('| Letter | Threat | Property violated | Definition | Applies to |');
@@ -836,7 +1419,10 @@ window.TM = window.TM || {};
       'CVSS v4.0 vector', 'CVSS v4.0 score', 'CVSS rationale',
       'Affects patient safety', 'Safety hazard ref', 'Safety impact', 'Harm',
       'Severity of harm', 'Safety file ref',
-      'Crosses boundary', 'Via flow', 'Existing controls', 'Recommended mitigations', 'Rule id'];
+      'Crosses boundary', 'Via flow', 'Existing controls', 'Recommended mitigations',
+      'FDA security objective', 'FDA control category', 'Lifecycle stage', 'Multi-patient harm',
+      'Security use cases', 'Decision', 'Implemented control', 'Residual risk', 'Rationale',
+      'Verification evidence', 'Rule id'];
     var rows = [head];
     a.findings.forEach(function (f) {
       rows.push([
@@ -852,7 +1438,13 @@ window.TM = window.TM || {};
         f.safety ? plain(f.safety.severityOfHarm) : '',
         f.safety ? f.safety.fileRef : '',
         (f.crossings || []).join('; '), f.via || '', f.existingControls || '',
-        f.mitigations.join(' | '), f.ruleId
+        f.mitigations.join(' | '),
+        TM.FDA.objective(f.fda.objective).label, TM.FDA.control(f.fda.control).label,
+        lifecycleText(f), f.multiPatient ? 'Yes' : 'No', f.useCases.join('; '),
+        f.residual.status, f.treatment ? f.treatment.control : '',
+        f.treatment ? residualText(f) : String(f.severity.label).toUpperCase(),
+        f.treatment ? f.treatment.rationale : '', f.treatment ? f.treatment.evidence : '',
+        f.ruleId
       ]);
     });
     return toCSV(rows);
@@ -870,7 +1462,8 @@ window.TM = window.TM || {};
       'STRIDE', 'STRIDE category', 'Security threat (cause)', 'Hazardous situation',
       'Harm', 'Severity of harm', 'Software safety class', 'Security severity',
       'CVSS v4.0 vector', 'CVSS v4.0 score', 'Candidate risk controls',
-      'Controls already in place', 'Safety file reference', 'Threat model', 'Safety file'];
+      'Controls already in place', 'Safety file reference', 'Threat model', 'Safety file',
+      'Decision', 'Implemented control', 'Residual security risk', 'Verification evidence'];
     var rows = [head];
 
     a.safetyTrace.forEach(function (row) {
@@ -884,7 +1477,10 @@ window.TM = window.TM || {};
             String(f.severity.label).toUpperCase(),
             f.cvss ? f.cvss.vector : '', f.cvss ? Number(f.cvss.score).toFixed(1) : '',
             f.mitigations.join(' | '), row.existingControls || '',
-            row.fileRef || 'MISSING', meta.name || '', meta.safetyDoc || ''
+            row.fileRef || 'MISSING', meta.name || '', meta.safetyDoc || '',
+            f.residual.status, f.treatment ? f.treatment.control : '',
+            f.treatment ? residualText(f) : String(f.severity.label).toUpperCase(),
+            f.treatment ? f.treatment.evidence : ''
           ]);
         });
       } else {
@@ -894,7 +1490,7 @@ window.TM = window.TM || {};
           '', '', 'No security threat raised by the model',
           row.notes || '', '', plain(row.severityOfHarm), plain(row.softwareSafetyClass),
           '', '', '', '', row.existingControls || '',
-          row.fileRef || 'MISSING', meta.name || '', meta.safetyDoc || ''
+          row.fileRef || 'MISSING', meta.name || '', meta.safetyDoc || '', '', '', '', ''
         ]);
       }
     });

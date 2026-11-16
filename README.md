@@ -6,6 +6,12 @@ flow diagram using the standard legend, annotate each element with security cate
 STRIDE report that explains which threats apply, why, what harm they could cause, and how
 each one traces back to the safety risk management file.
 
+The report is laid out against FDA's premarket cybersecurity guidance (*Cybersecurity in
+Medical Devices: Quality Management System Considerations and Content of Premarket
+Submissions*, February 2026): stated assumptions, the four security architecture views,
+pre- and post-mitigation risk, and every threat filed under FDA's security objectives and
+control categories. See [Aligning with FDA premarket guidance](#aligning-with-fda-premarket-guidance).
+
 It works just as well for ordinary IT threat modeling — the patient safety layer only
 appears once you mark something as safety-relevant.
 
@@ -100,13 +106,17 @@ its inputs.
 | Classification | Entity kind, Trust level | entities |
 | Classification | Exposure, Runtime privilege | processes |
 | Classification | Store kind | data stores |
-| Classification | Protocol | data flows |
+| Classification | Protocol, Protocol detail, Carries (data / code / commands), Interface state | data flows |
 | Classification | Asset kind, Owner | assets and elements |
 | Classification | Boundary kind | trust boundaries |
 | Controls | Authentication, Authorisation, Logging / audit | most elements |
 | Controls | Input validation, Availability controls | processes |
 | Controls | Encryption at rest, Integrity controls, Backup / recovery | data stores |
-| Controls | Encryption in transit, Message integrity, Throttling | data flows |
+| Controls | Encryption in transit, Message integrity, Replay protection, Throttling | data flows |
+| Controls | Keys and credentials held | processes |
+| Patient safety | Scale of compromise (one device, or many at once) | all elements |
+| Software supply chain and updates | Software origin, Component support status, SBOM reference, Update mechanism | processes |
+| Architecture views | Security use cases | all elements |
 
 ### 2a. Patient safety — what a compromise does to the patient
 
@@ -177,6 +187,72 @@ more of them the worse the credible harm. That is why a tampering threat against
 limit on a device that can kill comes out **Critical** while the same rule against a
 telemetry store comes out lower — see *Score the threats* below, all of it configurable.
 
+### 2c. Aligning with FDA premarket guidance
+
+FDA's guidance says what a threat model should contain (section V.A.1) and what the
+documentation around it should show. The tool covers the parts that belong in a threat
+model, and says plainly which parts live elsewhere.
+
+**State it, don't just draw it.** Deselect everything to reach *Threat model details*:
+
+| Field | Why FDA asks for it |
+| --- | --- |
+| Environment of use | Controls are judged against where the device is actually used, including the least secure network it will meet (IV.B) |
+| Assumptions, and the network assumption | A threat model should state its assumptions. FDA recommends assuming the adversary controls the network and can alter, drop and replay packets (V.A.1) |
+| Why this methodology | The rationale for the methodology chosen should accompany the threat model (V.A.1) |
+| Lifecycle considerations | Supply chain, manufacturing, deployment, interoperation, maintenance/update and decommission — risks a safety risk assessment tends to overlook (V.A.1) |
+| Risk acceptance | The scoring method before and after mitigation, and the acceptance criteria (V.A.2) |
+
+The network is **assumed hostile by default**. Under that assumption a process marked
+*Internal network* is still analysed as reachable by an attacker; switch the assumption to
+*trusted* and those findings drop out — with a note in the report that this departs from
+FDA's recommendation and has to be justified.
+
+**New rules.** Alongside the STRIDE rules, the engine now raises:
+
+| Threat | Fires when | Guidance |
+| --- | --- | --- |
+| Updates installed without authentication; not patchable in the field; rollback to a vulnerable release | *Update mechanism* on a process | Appendix 1.H |
+| Code not authenticated end to end | a flow *carries* code with no message signature | V.B.2(c), Appendix 1.D |
+| Commands can be replayed | a flow *carries* commands with no replay protection | Appendix 1.A |
+| Reliance on the wireless link alone | Bluetooth / NFC flow with no integrity beneath the link | V.A.3 |
+| Debug, dormant or weakly authenticated service interface | *Interface state* on a flow | Appendix 1.D, Appendix 2 |
+| Third-party software not traced to an SBOM; unsupported software | *Software origin*, *SBOM reference*, *Component support status* | V.A.4 |
+| A secret that is the same on every device; keys readable from storage | *Keys and credentials held* | Appendix 1.C |
+| Sensitive data that outlives the device | any sensitive data store | VI.A (decommissioning) |
+
+**Security architecture views (report section 7).** FDA asks for four views (V.B.2):
+
+- **Global system view** — the diagram, plus a table of every communication path: what it
+  carries, protocol and detail, interface state, authentication, encryption, integrity and
+  replay protection (the Appendix 2 detail).
+- **Multi-patient harm view** — every element whose *scale of compromise* is "multiple
+  devices or patients at once". Those threats are also weighted higher.
+- **Updatability and patchability view** — the code-carrying paths end to end, and each
+  process's origin, support status, update mechanism and SBOM reference.
+- **Security use case views** — one per name entered under *Security use cases*
+  (Programming, Alarming, Software update…), with the elements and threats involved.
+  Safety-relevant elements in no use case are listed as a gap.
+
+**Cybersecurity risk assessment (report section 8).** The severity the tool computes is
+the risk *before* mitigation. Under each threat in the report, **Record a risk treatment**
+captures the decision — mitigated by design, mitigated by a compensating control,
+transferred to the user through labeling, accepted, or not applicable — with the control,
+the **residual risk**, the rationale and the **verification evidence**. Section 8 then
+shows pre- and post-mitigation side by side, counts what is still open, and calls out
+residual risks above the acceptance threshold and mitigations with no test evidence.
+Treatments are saved in the model file and appear in every export.
+
+**Alignment tables (report section 9).** Every threat is filed under one of FDA's five
+security objectives (IV.B) and eight security control categories (V.B.1, Appendix 1), and
+tagged with the lifecycle stages it belongs to. Section 9.4 lists what the guidance expects
+a threat model to state and whether this one does; 9.5 lists what a submission needs that
+a threat model does not contain — the SBOM itself, the vulnerability assessment,
+unresolved anomalies, test reports, metrics, labeling and the management plan.
+
+This is a teaching aid. The alignment section is a reading aid for someone assembling a
+submission, not a determination that a device meets FDA's expectations.
+
 ### 3. Generate the report
 
 Press **STRIDE report**. The report contains:
@@ -192,7 +268,13 @@ Press **STRIDE report**. The report contains:
    and for safety threats the harm, severity of harm and safety file reference.
 5. **Patient safety traceability** — the matrix described above.
 6. **Coverage gaps** — the questions nobody answered.
-7. **Appendices** — a STRIDE reference table and an explanation of the severity rating.
+7. **Security architecture views** — global system, multi-patient harm,
+   updatability/patchability and security use cases.
+8. **Cybersecurity risk assessment** — pre- and post-mitigation risk, decisions, controls
+   and evidence for every threat.
+9. **FDA premarket alignment** — threats by security objective, control category and
+   lifecycle stage, and what the model states or still owes.
+10. **Appendices** — a STRIDE reference table and an explanation of the severity rating.
 
 Download it as **Markdown**, **HTML**, or **CSV** (one row per threat, drops straight into
 a risk register), or print to PDF.
@@ -219,7 +301,7 @@ all score the same way, and the report's Appendix B prints the arithmetic in ful
   "categoryPoints":   { "I": 0.5, "E": 0.5 },   // weight STRIDE categories differently
   "aggravatorPoints": { "patientSafety": 0.5, "sensitiveData": 0.5,
                         "externalExposure": 0.5, "markedAsset": 0.5,
-                        "safetyCriticalDoS": 0.5 },
+                        "safetyCriticalDoS": 0.5, "multiPatientHarm": 0.5 },
   "mitigatorPoints":  { "publicData": 0.5, "lowAvailabilityNeed": 0.5 },
   "harmSeverityPoints": {                       // weight by how bad the harm could be
     "Serious — injury needing professional intervention": 1,
@@ -298,8 +380,9 @@ findings are attached to the receiving element and cite the flow they came in on
 
 Each rule carries a base rating, adjusted by diagram context. Aggravating factors are:
 confidential or regulated data; an internet-facing or anonymous-facing element, or a flow
-crossing an external boundary; the element being marked as an asset; and, for
-denial-of-service, a safety-critical availability need. Under the built-in scale two of
+crossing an external boundary; the element being marked as an asset; a compromise that
+reaches multiple devices or patients at once; and, for denial-of-service, a
+safety-critical availability need. Under the built-in scale two of
 those raise the rating one step, and **Critical** is reserved for threats critical in
 themselves or carrying three; public data or a low availability need lowers it one. All of
 those numbers are editable — see *Score the threats* above. The ratings are a starting
@@ -343,6 +426,21 @@ A second session on patient safety, which is where the medical device content li
    a forced update, a rate limit — and ask what new safety risk it introduces. Security
    controls on a medical device are themselves design changes with their own hazards.
 
+A third session on what a regulator expects to see:
+
+1. **Assumptions first (15 min).** Open *Threat model details*. Flip the network assumption
+   to *trusted*, regenerate, and count what disappeared. Ask who in a hospital would have
+   to guarantee that assumption.
+2. **Follow the update (20 min).** Tick *Code* on every path software travels and set the
+   update mechanism on each process. Read section 7.3 as one path from the vendor to the
+   device: where does the manufacturer stop controlling it?
+3. **One compromise, many patients (15 min).** Set the scale of compromise per element and
+   read section 7.2. Which single element would you attack to reach every device?
+4. **Decide (25 min).** Each pair takes five threats and records a treatment: control,
+   residual risk, evidence. Argue about the residual — and about what counts as evidence.
+5. **What is still owed (15 min).** Section 9.4 and 9.5. Which rows can this team close,
+   and which need the SBOM, the test lab or the labeling team?
+
 ---
 
 ## Project layout
@@ -374,7 +472,9 @@ Security rules live in one array in `js/stride.js`:
 ```
 
 `test` receives the element and a context object (`impact`, `exposureScore`, `crossings`,
-`isAsset`). `{name}` is replaced with the element's title and `{n}` with the boundaries it
+`isAsset`). To change how a rule is filed under FDA's security objectives, control
+categories and lifecycle stages, edit the `OBJECTIVE_OF`, `CONTROL_OF` and `LIFECYCLE_OF`
+tables in the same file; the STRIDE letter supplies the default. `{name}` is replaced with the element's title and `{n}` with the boundaries it
 crosses. Adding a new category to ask about is a matter of appending to `TM.FIELDS` in
 `js/model.js` — the properties panel, the report and the coverage gap list all build
 themselves from that catalogue.

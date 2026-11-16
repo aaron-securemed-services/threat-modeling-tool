@@ -5,10 +5,23 @@
     "system": "Large-volume infusion pump with hospital connectivity and a vendor cloud service",
     "author": "Teaching example",
     "date": "2026-08-11",
-    "intendedUse": "Continuous and bolus intravenous delivery of medication to adult and paediatric inpatients, programmed at the bedside or by auto-programming from the EHR, under the supervision of clinical staff.",
     "scope": "In scope: the pump controller and its dose-limit interlock, the alarm path to the nurse call system, the hospital gateway, the drug library service and the vendor telemetry cloud. Out of scope: the EHR itself, hospital network infrastructure, and physical security of the ward.",
     "safetyDoc": "Infusion Pump Risk Management File (ISO 14971)",
-    "safetyDocRef": "RMF-IP-2200 rev C"
+    "safetyDocRef": "RMF-IP-2200 rev C",
+    "intendedUse": "Continuous and bolus intravenous delivery of medication to adult and paediatric inpatients, programmed at the bedside or by auto-programming from the EHR, under the supervision of clinical staff.",
+    "environment": "Acute-care wards and intensive care. The pump joins the hospital's clinical Wi-Fi alongside other vendors' devices and general IT. The hospital runs that network, not the manufacturer, and segmentation cannot be relied on. Pumps move between wards and are within reach of patients and visitors.",
+    "assumptions": "The hospital network is hostile. Clinical staff follow the programming workflow but cannot detect a value altered in transit. The EHR and the nurse call system belong to other manufacturers and are treated as untrusted peers. A visitor can reach the pump's ports unobserved for minutes at a time.",
+    "networkAssumption": "Hostile — an adversary can alter, drop and replay traffic",
+    "methodologyRationale": "STRIDE per element on a data flow diagram. The pump's cybersecurity risks arise at its interfaces, and a per-element sweep gives a coverage argument a reviewer can follow and repeat. Each safety-relevant function is also analysed for the hazard a compromise creates, so the result feeds the ISO 14971 file. STRIDE does not rank attacker effort, so exploitability is added per threat with CVSS v4.0.",
+    "acceptanceCriteria": "Scored before mitigation by the model, and after mitigation by the security and safety leads together. Residual Medium or below is acceptable. High needs sign-off against clinical benefit. Critical is not acceptable. Every threat with a path to patient harm is carried into RMF-IP-2200 by its SEC-HAZ reference.",
+    "acceptableResidual": "Medium",
+    "lifecycle": {
+      "supplyChain": "Pump firmware builds on a commercial RTOS and an open-source TLS library. The hospital gateway ships on a commercial OS image. One SBOM per release (SBOM-IP-2200).",
+      "manufacturing": "Every pump leaves the factory with the same service password and the same gateway key.",
+      "deployment": "Commissioned by hospital biomed onto the clinical Wi-Fi. Nothing forces the service password to change.",
+      "interoperation": "EHR auto-programming through the hospital gateway, and nurse call integration. Both are other manufacturers' systems.",
+      "maintenance": "Firmware and drug libraries come from the vendor fleet service through the hospital gateway, or are installed locally by a service technician from a file share."
+    }
   },
   "nodes": [
     {
@@ -84,7 +97,14 @@
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "Critical (safety / life)",
-        "owner": "Device firmware team"
+        "owner": "Device firmware team",
+        "harmScope": "Single device / single patient",
+        "useCases": "Programming, Delivering therapy, Software update",
+        "softwareOrigin": "Mixed — includes third-party components",
+        "componentSupport": "Actively maintained",
+        "sbomRef": "SBOM-IP-2200 §1 (pump firmware)",
+        "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+        "keyManagement": "Hardcoded, default or shared across devices"
       }
     },
     {
@@ -115,7 +135,14 @@
         "logging": "None",
         "dataClassification": "Internal",
         "criticality": "Critical (safety / life)",
-        "owner": "Device firmware team"
+        "owner": "Device firmware team",
+        "harmScope": "Single device / single patient",
+        "useCases": "Delivering therapy, Drug library update",
+        "softwareOrigin": "Proprietary (manufacturer-developed)",
+        "componentSupport": "Actively maintained",
+        "sbomRef": "SBOM-IP-2200 §1 (pump firmware)",
+        "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+        "keyManagement": "No keys or credentials held"
       }
     },
     {
@@ -146,7 +173,14 @@
         "logging": "Errors only",
         "dataClassification": "Confidential",
         "criticality": "Critical (safety / life)",
-        "owner": "Device firmware team"
+        "owner": "Device firmware team",
+        "harmScope": "Single device / single patient",
+        "useCases": "Alarming",
+        "softwareOrigin": "Proprietary (manufacturer-developed)",
+        "componentSupport": "Actively maintained",
+        "sbomRef": "SBOM-IP-2200 §1 (pump firmware)",
+        "updateMechanism": "Unauthenticated (unsigned image, file, USB or service tool)",
+        "keyManagement": "Hardcoded, default or shared across devices"
       }
     },
     {
@@ -177,7 +211,9 @@
         "logging": "None",
         "dataClassification": "Internal",
         "criticality": "Critical (safety / life)",
-        "owner": "Pharmacy informatics"
+        "owner": "Pharmacy informatics",
+        "harmScope": "Single device / single patient",
+        "useCases": "Delivering therapy, Drug library update"
       }
     },
     {
@@ -205,7 +241,9 @@
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "High",
-        "owner": "Clinical engineering"
+        "owner": "Clinical engineering",
+        "harmScope": "Single device / single patient",
+        "useCases": "Programming, Alarming"
       }
     },
     {
@@ -232,7 +270,9 @@
         "logging": "None",
         "dataClassification": "Internal",
         "criticality": "High",
-        "owner": "Clinical engineering"
+        "owner": "Clinical engineering",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Drug library update, Software update"
       }
     },
     {
@@ -265,7 +305,13 @@
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "Critical (safety / life)",
-        "owner": "Hospital IT"
+        "owner": "Hospital IT",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Programming, Alarming, Software update, Telemetry",
+        "softwareOrigin": "Mixed — includes third-party components",
+        "componentSupport": "No longer maintained (end of support)",
+        "updateMechanism": "Signed updates, no rollback protection",
+        "keyManagement": "Unique per device, stored in software"
       }
     },
     {
@@ -297,7 +343,12 @@
         "logging": "Security events logged",
         "dataClassification": "Confidential",
         "criticality": "Critical (safety / life)",
-        "owner": "Hospital IT"
+        "owner": "Hospital IT",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Alarming",
+        "softwareOrigin": "Commercial off-the-shelf",
+        "componentSupport": "Actively maintained",
+        "sbomRef": "Not part of the device (hospital system)"
       }
     },
     {
@@ -329,7 +380,14 @@
         "logging": "Security events logged",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "High",
-        "owner": "Vendor cloud team"
+        "owner": "Vendor cloud team",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Software update, Drug library update, Telemetry",
+        "softwareOrigin": "Mixed — includes third-party components",
+        "componentSupport": "Actively maintained",
+        "sbomRef": "SBOM-FLEET-12",
+        "updateMechanism": "Signed updates with rollback protection",
+        "keyManagement": "Unique per device, stored in software"
       }
     },
     {
@@ -359,7 +417,9 @@
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "Medium",
-        "owner": "Vendor cloud team"
+        "owner": "Vendor cloud team",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Telemetry"
       }
     },
     {
@@ -384,7 +444,9 @@
         "assetKind": "Physical",
         "dataClassification": "Restricted (PII / PHI / PCI)",
         "criticality": "Critical (safety / life)",
-        "owner": "Clinical service"
+        "owner": "Clinical service",
+        "harmScope": "Single device / single patient",
+        "useCases": "Delivering therapy"
       }
     }
   ],
@@ -414,7 +476,15 @@
         "authorization": "Simple ownership check",
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Single device / single patient",
+        "useCases": "Programming",
+        "carries": [
+          "commands"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Not applicable — not a replayable channel",
+        "protocolDetail": "Front-panel keypad and touchscreen"
       }
     },
     {
@@ -442,7 +512,53 @@
         "authorization": "None",
         "logging": "None",
         "dataClassification": "Restricted (PII / PHI / PCI)",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Programming",
+        "carries": [
+          "commands"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "None",
+        "protocolDetail": "HTTP/1.1, tcp/8080, JSON order"
+      }
+    },
+    {
+      "id": "flow-msox8623-q",
+      "type": "flow",
+      "from": "process-msox8623-a",
+      "to": "process-msox8623-4",
+      "bidirectional": false,
+      "title": "Firmware and library push",
+      "description": "Firmware images and drug libraries relayed from the vendor to each pump.",
+      "isAsset": false,
+      "existingControls": "",
+      "props": {
+        "safetyFunctions": [
+          "control",
+          "safetyStop"
+        ],
+        "harmSeverity": "Catastrophic — patient death",
+        "softwareSafetyClass": "Class C — death or serious injury possible",
+        "safetyFileRef": "HAZ-011",
+        "safetyNotes": "Whatever arrives here becomes the software that drives the pump and the limits that constrain it.",
+        "protocol": "HTTP (cleartext)",
+        "encryptionInTransit": "None (cleartext)",
+        "flowIntegrity": "None",
+        "throttling": "None",
+        "authentication": "Shared secret or API key",
+        "authorization": "Shared credential for everyone",
+        "logging": "Errors only",
+        "dataClassification": "Internal",
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Software update, Drug library update",
+        "carries": [
+          "code"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "None",
+        "protocolDetail": "HTTP/1.1, tcp/8080, image pulled on notification"
       }
     },
     {
@@ -469,7 +585,15 @@
         "authorization": "None",
         "logging": "None",
         "dataClassification": "Internal",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Single device / single patient",
+        "useCases": "Delivering therapy",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Not applicable — not a replayable channel",
+        "protocolDetail": "In-process call"
       }
     },
     {
@@ -496,7 +620,15 @@
         "authorization": "None",
         "logging": "None",
         "dataClassification": "Internal",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Single device / single patient",
+        "useCases": "Delivering therapy",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Not applicable — not a replayable channel",
+        "protocolDetail": "File read at start-up and on change"
       }
     },
     {
@@ -523,7 +655,15 @@
         "authorization": "None",
         "logging": "Errors only",
         "dataClassification": "Confidential",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Single device / single patient",
+        "useCases": "Alarming",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Not applicable — not a replayable channel",
+        "protocolDetail": "In-process message queue"
       }
     },
     {
@@ -550,7 +690,15 @@
         "authorization": "None",
         "logging": "Errors only",
         "dataClassification": "Confidential",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Single device / single patient",
+        "useCases": "Alarming",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "None",
+        "protocolDetail": "HTTP/1.1, tcp/8081"
       }
     },
     {
@@ -577,7 +725,15 @@
         "authorization": "Shared credential for everyone",
         "logging": "None",
         "dataClassification": "Internal",
-        "criticality": "High"
+        "criticality": "High",
+        "harmScope": "Single device / single patient",
+        "useCases": "Drug library update",
+        "carries": [
+          "code"
+        ],
+        "interfaceState": "Service / maintenance only",
+        "replayProtection": "None",
+        "protocolDetail": "SMB 2, tcp/445"
       }
     },
     {
@@ -606,7 +762,15 @@
         "authorization": "Shared credential for everyone",
         "logging": "Security events logged",
         "dataClassification": "Internal",
-        "criticality": "High"
+        "criticality": "High",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Software update, Drug library update",
+        "carries": [
+          "code"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Timestamp or sequence number",
+        "protocolDetail": "TLS 1.2, tcp/443"
       }
     },
     {
@@ -633,7 +797,15 @@
         "authorization": "Role-based (RBAC)",
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
-        "criticality": "Medium"
+        "criticality": "Medium",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Telemetry",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Timestamp or sequence number",
+        "protocolDetail": "TLS 1.2, tcp/443"
       }
     },
     {
@@ -655,7 +827,15 @@
         "authorization": "Role-based (RBAC)",
         "logging": "Errors only",
         "dataClassification": "Restricted (PII / PHI / PCI)",
-        "criticality": "Medium"
+        "criticality": "Medium",
+        "harmScope": "Multiple devices or patients at once",
+        "useCases": "Telemetry",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Timestamp or sequence number",
+        "protocolDetail": "TLS 1.2, tcp/443"
       }
     },
     {
@@ -682,7 +862,15 @@
         "authorization": "None",
         "logging": "None",
         "dataClassification": "Confidential",
-        "criticality": "Critical (safety / life)"
+        "criticality": "Critical (safety / life)",
+        "harmScope": "Single device / single patient",
+        "useCases": "Alarming",
+        "carries": [
+          "data"
+        ],
+        "interfaceState": "In use for the intended use",
+        "replayProtection": "Not applicable — not a replayable channel",
+        "protocolDetail": "Audible and visual alarm at the pump"
       }
     }
   ],
@@ -693,6 +881,48 @@
       "score": 9.4,
       "severity": "Critical",
       "rationale": "Scored with the clinical engineering team; S:P set because the subsequent system impact is the patient.",
+      "updated": "2026-08-11"
+    }
+  },
+  "treatments": {
+    "process-msox8623-4::safe-control-s": {
+      "status": "Mitigated by design",
+      "control": "SR-021 therapy commands signed by the gateway and verified at the pump; SR-022 confirmation at the pump for any rate increase",
+      "residual": "Medium",
+      "rationale": "A spoofed command is rejected at the pump. What remains is a compromised gateway signing key.",
+      "evidence": "TC-SEC-041; PT-2026-02 §5.1",
+      "updated": "2026-08-11"
+    },
+    "process-msox8623-5::safe-stop-t": {
+      "status": "Mitigated by design",
+      "control": "SR-030 absolute hard limit in firmware that no drug library entry can widen",
+      "residual": "High",
+      "rationale": "Library tampering is bounded by the firmware limit, but soft limits can still be widened until the signed drug library ships in release 2.1.",
+      "evidence": "",
+      "updated": "2026-08-11"
+    },
+    "process-msox8623-6::safe-alarm-d": {
+      "status": "Mitigated by compensating control",
+      "control": "Audible and visual annunciation at the pump does not depend on the network path",
+      "residual": "Medium",
+      "rationale": "Remote escalation can still be blocked; the bedside alarm cannot.",
+      "evidence": "TC-ALM-112",
+      "updated": "2026-08-11"
+    },
+    "process-msox8623-a::proc-e-unsupported": {
+      "status": "Transferred to the user (disclosed in labeling)",
+      "control": "",
+      "residual": "High",
+      "rationale": "The gateway OS image is past end of support. Hospitals are told to isolate it on its own VLAN (IFU §9.3) until the 3.0 image ships.",
+      "evidence": "",
+      "updated": "2026-08-11"
+    },
+    "entity-msox8623-8::ent-r-nolog": {
+      "status": "Accepted",
+      "control": "",
+      "residual": "Low",
+      "rationale": "Programming at the bedside is attributed through the ward's medication administration record rather than by the pump.",
+      "evidence": "",
       "updated": "2026-08-11"
     }
   }
