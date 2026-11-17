@@ -677,26 +677,56 @@
   function renderModelMeta(container) {
     container.innerHTML = '<h2>Threat model details</h2>';
     var meta = state.model.meta;
-    [
-      { key: 'system', label: 'System / device name', type: 'text', help: 'The system or device this diagram describes.' },
-      { key: 'author', label: 'Author(s)', type: 'text' },
-      { key: 'date', label: 'Date', type: 'text' },
-      { key: 'intendedUse', label: 'Intended use', type: 'textarea', help: 'What the device is for, and for which patients. Everything about patient safety is judged against this.' },
-      { key: 'scope', label: 'Scope and assumptions', type: 'textarea', help: 'What is in scope, what is explicitly out, and what you are assuming. Printed at the top of the report.' },
-      { key: 'safetyDoc', label: 'Safety risk management file', type: 'text', help: 'The ISO 14971 risk management file this security analysis feeds, by name.' },
-      { key: 'safetyDocRef', label: 'Safety file document ID / version', type: 'text', help: 'Printed on the traceability matrix so the two documents can be reconciled.' }
-    ].forEach(function (f) {
+    if (!meta.lifecycle || typeof meta.lifecycle !== 'object') meta.lifecycle = {};
+    if (!meta.networkAssumption) meta.networkAssumption = TM.NETWORK_HOSTILE;
+
+    function group(title, note) {
+      var fs = document.createElement('fieldset');
+      var lg = document.createElement('legend');
+      lg.textContent = title;
+      fs.appendChild(lg);
+      if (note) {
+        var n = document.createElement('div');
+        n.className = 'field-help';
+        n.style.marginBottom = '8px';
+        n.textContent = note;
+        fs.appendChild(n);
+      }
+      container.appendChild(fs);
+      return fs;
+    }
+
+    /* One labelled control bound to `target[key]`. */
+    function add(parent, f, target) {
+      target = target || meta;
       var wrap = document.createElement('div');
       wrap.className = 'field';
       var lbl = document.createElement('label');
       lbl.textContent = f.label;
       wrap.appendChild(lbl);
-      var input = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
-      if (f.type !== 'textarea') input.type = 'text';
-      input.value = meta[f.key] || '';
-      input.setAttribute('data-field', 'meta.' + f.key);
-      input.addEventListener('input', function () { meta[f.key] = input.value; autosave(); });
-      input.addEventListener('focus', function () { checkpoint(); });
+      var input;
+      if (f.type === 'select') {
+        input = document.createElement('select');
+        f.options.forEach(function (opt) {
+          var o = document.createElement('option');
+          o.value = opt.value; o.textContent = opt.label;
+          input.appendChild(o);
+        });
+        input.value = target[f.key] || '';
+        input.addEventListener('change', function () {
+          checkpoint();
+          target[f.key] = input.value;
+          autosave();
+        });
+      } else {
+        input = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+        if (f.type !== 'textarea') input.type = 'text';
+        input.value = target[f.key] || '';
+        if (f.placeholder) input.placeholder = f.placeholder;
+        input.addEventListener('input', function () { target[f.key] = input.value; autosave(); });
+        input.addEventListener('focus', function () { checkpoint(); });
+      }
+      input.setAttribute('data-field', 'meta.' + (target === meta ? '' : 'lifecycle.') + f.key);
       wrap.appendChild(input);
       if (f.help) {
         var h = document.createElement('div');
@@ -704,8 +734,48 @@
         h.textContent = f.help;
         wrap.appendChild(h);
       }
-      container.appendChild(wrap);
+      parent.appendChild(wrap);
+    }
+
+    var device = group('Device');
+    add(device, { key: 'system', label: 'System / device name', type: 'text', help: 'The system or device this diagram describes.' });
+    add(device, { key: 'author', label: 'Author(s)', type: 'text' });
+    add(device, { key: 'date', label: 'Date', type: 'text' });
+    add(device, { key: 'intendedUse', label: 'Intended use', type: 'textarea', help: 'What the device is for, and for which patients. Everything about patient safety is judged against this.' });
+    add(device, { key: 'environment', label: 'Environment of use', type: 'textarea', help: 'Where it is used and what it is connected to there. Analyse for the least secure environment you expect it to meet, not the best one.' });
+    add(device, { key: 'scope', label: 'Scope', type: 'textarea', help: 'What is in scope and what is explicitly out. Printed at the top of the report.' });
+
+    var basis = group('Assumptions and method',
+      'FDA asks a threat model to state its assumptions and to give the rationale for the methodology chosen.');
+    add(basis, {
+      key: 'networkAssumption', label: 'Network assumption', type: 'select',
+      options: TM.NETWORK_ASSUMPTIONS.map(function (v) { return { value: v, label: v }; }),
+      help: 'FDA recommends assuming the adversary controls the network. Under "hostile", an element on an internal network is still analysed as reachable.'
     });
+    add(basis, { key: 'assumptions', label: 'Assumptions', type: 'textarea', help: 'Everything the analysis takes for granted about the system and its environment: who is trusted, what the user is expected to do, what the network provides.' });
+    add(basis, { key: 'methodologyRationale', label: 'Why this methodology', type: 'textarea', help: 'Why STRIDE per element suits this device, and anything it was combined with (attack trees, kill chains, abuse cases).' });
+
+    var risk = group('Risk acceptance',
+      'A threat is rated before mitigation by the model and after mitigation by you, in the report. These are the criteria the residual risk is judged against.');
+    add(risk, {
+      key: 'acceptableResidual', label: 'Highest acceptable residual risk', type: 'select',
+      options: [{ value: '', label: TM.UNSET }].concat(TM.scoringOf(state.model).levels.map(function (lv) {
+        return { value: lv.label, label: lv.label };
+      })),
+      help: 'Residual risks above this level are flagged in the report as needing more control or a justification.'
+    });
+    add(risk, { key: 'acceptanceCriteria', label: 'Acceptance criteria', type: 'textarea', help: 'How risk is scored before and after mitigation, who may accept what, and how security risks are handed to the safety risk assessment.' });
+
+    var life = group('Lifecycle considerations',
+      'Risks a design-only view tends to miss. Record what was considered at each stage; the report sets it beside the threats the model raised there.');
+    TM.FDA.LIFECYCLE.forEach(function (stage) {
+      add(life, { key: stage.key, label: stage.label, type: 'textarea', placeholder: stage.prompt }, meta.lifecycle);
+    });
+
+    var safety = group('Safety risk management file');
+    add(safety, { key: 'safetyDoc', label: 'Safety risk management file', type: 'text', help: 'The ISO 14971 risk management file this security analysis feeds, by name.' });
+    add(safety, { key: 'safetyDocRef', label: 'Safety file document ID / version', type: 'text', help: 'Printed on the traceability matrix so the two documents can be reconciled.' });
+
     var p = document.createElement('p');
     p.style.fontSize = '12px';
     p.style.color = '#5b6478';
@@ -862,6 +932,13 @@
     $('reportContent').innerHTML = TM.buildReportHTML(state.model, analysis, { interactive: true });
     $('reportModal').hidden = false;
     $('reportContent').scrollTop = scrollTop;
+    if (opts.openTreatKey) {
+      var tbox = $('reportContent').querySelector('[data-treat-key="' + cssEscape(opts.openTreatKey) + '"]');
+      if (tbox) {
+        var tform = tbox.querySelector('[data-treat-form]');
+        if (tform) tform.classList.add('open');
+      }
+    }
     if (opts.openCvssKey) {
       var box = $('reportContent').querySelector('[data-cvss-key="' + cssEscape(opts.openCvssKey) + '"]');
       if (box) {
@@ -891,11 +968,28 @@
       if (save) { saveCvss(save.closest('[data-cvss-key]')); return; }
       var clear = e.target.closest('[data-cvss-clear]');
       if (clear) { clearCvss(clear.closest('[data-cvss-key]')); return; }
+
+      var tToggle = e.target.closest('[data-treat-toggle]');
+      if (tToggle) {
+        var tForm = tToggle.parentNode.querySelector('[data-treat-form]');
+        if (tForm) tForm.classList.toggle('open');
+        return;
+      }
+      var tSave = e.target.closest('[data-treat-save]');
+      if (tSave) { saveTreatment(tSave.closest('[data-treat-key]')); return; }
+      var tClear = e.target.closest('[data-treat-clear]');
+      if (tClear) { clearTreatment(tClear.closest('[data-treat-key]')); return; }
     });
 
     /* Enter in either field saves, so the form is usable without the mouse. */
     root.addEventListener('keydown', function (e) {
       if (e.key !== 'Enter') return;
+      var treat = e.target.closest && e.target.closest('[data-treat-key]');
+      if (treat && e.target.matches('[data-treat-control], [data-treat-rationale], [data-treat-evidence]')) {
+        e.preventDefault();
+        saveTreatment(treat);
+        return;
+      }
       var box = e.target.closest && e.target.closest('[data-cvss-key]');
       if (!box) return;
       if (!e.target.matches('[data-cvss-vector], [data-cvss-score], [data-cvss-rationale]')) return;
@@ -935,6 +1029,47 @@
     autosave();
     openReport({ keepScroll: true, openCvssKey: key });
     status('CVSS score removed.');
+  }
+
+  /* ---------------------------------------------------------------------
+   * Risk treatment entry inside the report: the decision, the control, the
+   * residual risk and the evidence for one threat.
+   * ------------------------------------------------------------------- */
+  function saveTreatment(box) {
+    if (!box) return;
+    var key = box.getAttribute('data-treat-key');
+    var errBox = box.querySelector('[data-treat-error]');
+    var levels = TM.scoringOf(state.model).levels.map(function (lv) { return lv.label; });
+    var made = TM.makeTreatment({
+      status: box.querySelector('[data-treat-status]').value,
+      residual: box.querySelector('[data-treat-residual]').value,
+      control: box.querySelector('[data-treat-control]').value,
+      rationale: box.querySelector('[data-treat-rationale]').value,
+      evidence: box.querySelector('[data-treat-evidence]').value
+    }, levels);
+    if (!made.ok) {
+      errBox.hidden = false;
+      errBox.innerHTML = made.errors.map(function (m) { return escapeHtml(m); }).join('<br>');
+      return;
+    }
+    errBox.hidden = true;
+    checkpoint();
+    state.model.treatments = state.model.treatments || {};
+    state.model.treatments[key] = made.treatment;
+    autosave();
+    openReport({ keepScroll: true });
+    status('Risk treatment recorded: ' + made.treatment.status +
+      (made.treatment.residual ? ', residual ' + made.treatment.residual : '') + '.');
+  }
+
+  function clearTreatment(box) {
+    if (!box) return;
+    var key = box.getAttribute('data-treat-key');
+    checkpoint();
+    if (state.model.treatments) delete state.model.treatments[key];
+    autosave();
+    openReport({ keepScroll: true, openTreatKey: key });
+    status('Risk treatment removed; the threat is open again.');
   }
 
   /* ---------------------------------------------------------------------
@@ -1104,6 +1239,31 @@
       'in a way that harms the patient</b>? Could it cause <b>incorrect alarms</b> — real ones suppressed, or false ' +
       'ones injected? Could it <b>degrade a safety stop</b> so the last barrier does not engage? A "no" is an answer ' +
       'worth recording, not a blank.</p>',
+      '<h3>2b. What FDA expects of a threat model</h3>',
+      '<p>The tool follows FDA\'s premarket cybersecurity guidance (' + escapeHtml(TM.FDA.ISSUED) + '). Deselect ' +
+      'everything on the canvas to reach <b>Threat model details</b>, where the guidance asks you to state things ' +
+      'rather than draw them:</p>',
+      '<ul>',
+      '<li><b>Assumptions</b> about the system and its environment of use. The network is assumed hostile unless you ' +
+      'say otherwise — an adversary who can alter, drop and replay packets — so an element on an "internal" network ' +
+      'is still analysed as reachable.</li>',
+      '<li>The <b>rationale for the methodology</b>.</li>',
+      '<li><b>Lifecycle considerations</b>: supply chain, manufacturing, deployment, interoperation, maintenance and ' +
+      'update, and decommission — the risks a safety risk assessment tends to overlook.</li>',
+      '<li><b>Risk acceptance criteria</b>, and the highest residual risk that is acceptable.</li>',
+      '</ul>',
+      '<p>On the diagram, four sets of categories feed the security architecture views FDA asks for:</p>',
+      '<ul>',
+      '<li><b>Scale of compromise</b> on every element — one device and patient, or many at once — builds the ' +
+      '<b>multi-patient harm view</b> and raises the rating of the threats concerned.</li>',
+      '<li><b>Carries</b> on a data flow (data, code, commands) and <b>Update mechanism</b> on a process build the ' +
+      '<b>updatability and patchability view</b>. A flow that carries code is checked for end-to-end signing; one that ' +
+      'carries commands is checked for replay protection.</li>',
+      '<li><b>Security use cases</b> on any element (comma separated: Programming, Alarming, Software update…) build one ' +
+      '<b>security use case view</b> per name.</li>',
+      '<li><b>Software origin</b>, <b>support status</b> and <b>SBOM reference</b> on a process cover third-party ' +
+      'components; <b>Interface state</b> on a flow covers service, debug and dormant interfaces.</li>',
+      '</ul>',
       '<h3>3. Generate the report</h3>',
       '<p>Press <b>STRIDE report</b>. The report applies STRIDE per element:</p>',
       '<table><thead><tr><th>Letter</th><th>Threat</th><th>Violates</th><th>Applies to</th></tr></thead><tbody>',
@@ -1116,6 +1276,17 @@
       }).join(''),
       '</tbody></table>',
       '<p>Download it as Markdown, HTML or CSV (one row per threat, for a risk register), or print to PDF.</p>',
+      '<p>Sections 7 to 9 are the FDA layer: the four <b>security architecture views</b>; the <b>cybersecurity risk ' +
+      'assessment</b>, pre- and post-mitigation; and the <b>alignment</b> tables, which file every threat under one of ' +
+      'FDA\'s five security objectives and eight control categories, and list what the model states and what it ' +
+      'still owes.</p>',
+      '<h3>3c. Risk treatment: pre- and post-mitigation</h3>',
+      '<p>The severity the tool computes is the risk <em>before</em> mitigation. Under each threat in the report, ' +
+      '<b>Record a risk treatment</b> captures what was decided — mitigated by design or by a compensating control, ' +
+      'transferred to the user through labeling, accepted, or not applicable — together with the control, the ' +
+      '<b>residual risk</b>, the rationale, and the <b>verification evidence</b> that shows the control works. A ' +
+      'threat with no treatment is <em>open</em>. Residual risks above your acceptance threshold, and mitigations ' +
+      'with no evidence, are called out in section 8.</p>',
       '<h3>3a. Severity scoring</h3>',
       '<p>The built-in scale rates each threat from the rule\'s base rating plus the diagram context. Press ' +
       '<b>Scoring…</b> to see exactly how that arithmetic works, or to import your own profile: your own severity ' +
@@ -1192,7 +1363,8 @@
         sensitiveData: 0.5,
         externalExposure: 0.5,
         markedAsset: 0.5,
-        safetyCriticalDoS: 0.5
+        safetyCriticalDoS: 0.5,
+        multiPatientHarm: 0.5
       },
       mitigatorPoints: { publicData: 0.5, lowAvailabilityNeed: 0.5 },
       harmSeverityPoints: TM.HARM_SEVERITY.reduce(function (acc, level) {

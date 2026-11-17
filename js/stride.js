@@ -112,6 +112,14 @@ window.TM = window.TM || {};
   function restricted(el) {
     return is(el, 'dataClassification', 'Restricted (PII / PHI / PCI)');
   }
+  /** A multi-select category contains this value. */
+  function has(el, key, value) {
+    var v = el.props && el.props[key];
+    return Array.isArray(v) && v.indexOf(value) !== -1;
+  }
+  function filled(el, key) {
+    return String((el.props && el.props[key]) || '').trim() !== '';
+  }
 
   /* ---------------------------------------------------------------------
    * Rule catalogue
@@ -345,6 +353,87 @@ window.TM = window.TM || {};
       ]
     },
 
+    /* ---- supply chain, keys and updates (FDA V.A.4, Appendix 1.C / 1.H) ---- */
+    {
+      id: 'proc-t-update-unauth', types: ['process'], cat: 'T', risk: 'critical',
+      test: function (el) { return weak(el, 'updateMechanism', 'Unauthenticated (unsigned image, file, USB or service tool)'); },
+      title: 'Updates to {name} are installed without cryptographic authentication',
+      threat: 'Whatever is presented to {name} as an update is installed. Anyone who can reach the update path - a USB port, a service tool, a file share, a spoofed server - can replace the software, and every control implemented in that software goes with it.',
+      mitigations: [
+        'Accept only updates whose signature verifies against a key anchored in the device; refuse to install when the signature is absent or fails.',
+        'Sign the version number and metadata along with the image, so an old vulnerable release cannot be presented as new.',
+        'Require an authenticated, authorised user or server before an update is offered at all.'
+      ]
+    },
+    {
+      id: 'proc-t-update-none', types: ['process'], cat: 'T', risk: 'high',
+      test: function (el) { return weak(el, 'updateMechanism', 'Not updatable in the field'); },
+      title: '{name} cannot be patched once it is in the field',
+      threat: 'A vulnerability found in {name} after release stays there for the life of the device. Exploitability only grows over that time, and the only remedies left are compensating controls somebody else has to operate, or a recall.',
+      mitigations: [
+        'Design in a secure update path now, with the storage and processing headroom future patches will need.',
+        'Plan security patches that can ship independently of feature releases.',
+        'If the element really cannot be updated, isolate it so that what is reachable from outside can be.'
+      ]
+    },
+    {
+      id: 'proc-t-update-rollback', types: ['process'], cat: 'T', risk: 'medium',
+      test: function (el) { return weak(el, 'updateMechanism', 'Signed updates, no rollback protection'); },
+      title: '{name} can be rolled back to a vulnerable release',
+      threat: 'An older image of {name} is still validly signed. An attacker who can present it reinstates every vulnerability that later releases fixed, without breaking any signature check.',
+      mitigations: [
+        'Enforce a monotonic version counter held where the update itself cannot rewrite it.',
+        'Allow a downgrade only through separately signed downgrade metadata, and log it.',
+        'Make the installed version visible to the operator and in the audit trail.'
+      ]
+    },
+    {
+      id: 'proc-t-sbom', types: ['process'], cat: 'T', risk: 'medium',
+      test: function (el) {
+        return is(el, 'softwareOrigin', 'Commercial off-the-shelf', 'Open source', 'Mixed — includes third-party components') &&
+          !filled(el, 'sbomRef');
+      },
+      title: 'Third-party software in {name} is not traced to an SBOM',
+      threat: '{name} is built from components the manufacturer did not write, but nothing here ties it to a software bill of materials. When a vulnerability is published in one of those components, nobody can say whether this device is affected.',
+      mitigations: [
+        'Maintain a machine-readable SBOM covering proprietary, purchased and open-source components and their upstream dependencies.',
+        'Record each component\'s level of support and end-of-support date alongside it.',
+        'Monitor the SBOM against vulnerability sources, including the CISA Known Exploited Vulnerabilities catalogue.'
+      ]
+    },
+    {
+      id: 'proc-e-unsupported', types: ['process'], cat: 'E', risk: 'high',
+      test: function (el) { return weak(el, 'componentSupport', 'No longer maintained (end of support)', 'Abandoned / unknown'); },
+      title: '{name} runs software that no longer receives security fixes',
+      threat: 'Vulnerabilities in the software behind {name} will keep being published and will never be patched upstream. Each one is a ready-made way into the device for anyone who reads the advisory.',
+      mitigations: [
+        'Plan the replacement or in-house maintenance of the component before its support ends, not after.',
+        'Keep the design modular enough that a third-party component can be swapped.',
+        'Until then, reduce what can reach it, and tell users what they need to know to manage the risk.'
+      ]
+    },
+    {
+      id: 'proc-i-sharedkeys', types: ['process'], cat: 'I', risk: 'high',
+      test: function (el) { return weak(el, 'keyManagement', 'Hardcoded, default or shared across devices'); },
+      title: 'A secret held by {name} is the same on every device',
+      threat: 'The credential or key {name} relies on is hardcoded, left at its default, or shared across the product line. Extracting it once - from one device, a firmware image or a manual - yields access to every device that carries it.',
+      mitigations: [
+        'Provision a unique credential or key pair per device at manufacture; never derive keys from serial numbers or other discoverable identifiers.',
+        'Remove hardcoded and default passwords; force a change at commissioning where a password has to exist.',
+        'Use public-key schemes so that nothing extracted from one device authenticates as another.'
+      ]
+    },
+    {
+      id: 'proc-i-softkeys', types: ['process'], cat: 'I', risk: 'low',
+      test: function (el) { return weak(el, 'keyManagement', 'Unique per device, stored in software'); },
+      title: 'Keys held by {name} can be read out of storage',
+      threat: 'The keys are unique to the device but live in ordinary storage. Anyone with the device in their hands, a filesystem image or code execution in {name} can copy them and impersonate this device from elsewhere.',
+      mitigations: [
+        'Hold keys in a secure element, TPM or hardware-backed keystore so they can be used but not exported.',
+        'Limit what a single device key can do, and be able to revoke it.'
+      ]
+    },
+
     /* =========================== DATA STORE =========================== */
     {
       id: 'ds-t-integrity', types: ['datastore'], cat: 'T', risk: 'medium',
@@ -458,6 +547,18 @@ window.TM = window.TM || {};
       ]
     },
 
+    {
+      id: 'ds-i-decommission', types: ['datastore'], cat: 'I', risk: 'low',
+      test: function (el) { return sensitive(el); },
+      title: 'Sensitive data in {name} outlives the device\'s time in service',
+      threat: 'When the device is returned, repaired, resold or thrown away, {name} still holds patient data and credentials. Whoever handles it next has the device in their hands and all the time they need.',
+      mitigations: [
+        'Provide a sanitisation function that erases data and credentials, and say how to use it in the labeling.',
+        'Encrypt with a key that can be destroyed, so erasure does not depend on overwriting every block.',
+        'Revoke the device\'s identity and credentials on the server side when it leaves service.'
+      ]
+    },
+
     /* ============================= FLOW =============================== */
     {
       id: 'flow-t-cleartext', types: ['flow'], cat: 'T', risk: 'high',
@@ -540,6 +641,43 @@ window.TM = window.TM || {};
         'Set aggressive timeouts and a circuit breaker; define the degraded behaviour explicitly.',
         'Monitor certificate expiry and dependency health as first-class alerts.',
         'Queue or cache where eventual processing is acceptable.'
+      ]
+    },
+
+    {
+      id: 'flow-t-code-unsigned', types: ['flow'], cat: 'T', risk: 'critical',
+      test: function (el) { return has(el, 'carries', 'code') && weakOrUnset(el, 'flowIntegrity', 'None', 'Transport (TLS) only'); },
+      title: 'Code delivered over "{name}" is not authenticated end to end',
+      threat: 'This path carries software, firmware or configuration that the receiver will run, protected by the transport at most. Anything on the path that the manufacturer does not control - a hospital proxy, a laptop, removable media - can substitute its own code.',
+      mitigations: [
+        'Sign the code at the source and verify the signature on the device before it is installed or executed.',
+        'Treat the delivery path as untrusted from the update server to the device: transport security is an addition, not the control.',
+        'Define what the receiver does when a transfer is interrupted or a signature fails, and test it.'
+      ]
+    },
+    {
+      id: 'flow-t-replay', types: ['flow'], cat: 'T', risk: 'high',
+      test: function (el) { return has(el, 'carries', 'commands') && weakOrUnset(el, 'replayProtection', 'None'); },
+      title: 'Commands on "{name}" can be captured and replayed',
+      threat: 'A command recorded from this flow is still valid when it is sent again. An attacker does not need to forge or even understand it - only to hold it and repeat it at a moment of their choosing.',
+      mitigations: [
+        'Bind each command to a session and a nonce or monotonic counter, and reject anything already seen.',
+        'Authenticate the counter along with the command, so it cannot be rewritten in transit.',
+        'Limit how long a session, and therefore a captured message, stays valid.'
+      ]
+    },
+    {
+      id: 'flow-t-linklayer', types: ['flow'], cat: 'T', risk: 'medium',
+      test: function (el) {
+        return is(el, 'protocol', 'Bluetooth / BLE', 'NFC / RFID / proprietary RF') &&
+          weakOrUnset(el, 'flowIntegrity', 'None', 'Transport (TLS) only');
+      },
+      title: '"{name}" relies on the security of the wireless link alone',
+      threat: 'Pairing and link encryption are the only protection on this flow. A weakness in the radio protocol or its stack - and they are found regularly - leaves nothing underneath to protect what the device receives.',
+      mitigations: [
+        'Add application-layer authentication and integrity beneath the link, so the payload is protected whatever happens to the radio protocol.',
+        'Use the strongest pairing mode the protocol offers and refuse to fall back to a weaker one.',
+        'Reject connections the device has not been explicitly paired or provisioned for.'
       ]
     },
 
@@ -879,8 +1017,99 @@ window.TM = window.TM || {};
         'Grant the calling identity the narrowest set of operations that flow actually needs.',
         'Treat everything arriving from across the boundary as untrusted input as well.'
       ]
+    },
+    {
+      id: 'x-flow-e-debug', cat: 'E', risk: 'high',
+      targets: ['process', 'datastore'],
+      test: function (flow) { return weak(flow, 'interfaceState', 'Debug / test interface', 'Built in but unused / dormant'); },
+      title: 'Debug or dormant interface "{flow}" reaches {name}',
+      threat: '"{flow}" is not part of the intended use, but it is still there. Development and unused interfaces are rarely held to the access control of the clinical ones, and through this one {source} reaches {name} directly.',
+      mitigations: [
+        'Remove or disable debug, test and unused interfaces before the product ships, and verify on a production unit that they are gone.',
+        'Where an interface has to remain, require the same authentication and authorisation as any other entry point.',
+        'Show that dormant functionality cannot be activated, and seal ports that should never be opened.'
+      ]
+    },
+    {
+      id: 'x-flow-e-service', cat: 'E', risk: 'high',
+      targets: ['process', 'datastore'],
+      test: function (flow) {
+        return weak(flow, 'interfaceState', 'Service / maintenance only') &&
+          !is(flow, 'authentication', 'Multi-factor', 'Client certificate (mTLS)');
+      },
+      title: 'Service access over "{flow}" into {name} lacks strong authentication',
+      threat: '"{flow}" exists for maintenance and carries the privilege that goes with it, yet nothing stronger than a shared or single-factor credential stands in front of it. Service credentials are passed between people, written down and rarely changed.',
+      mitigations: [
+        'Require multi-factor or certificate-based authentication for service and maintenance access.',
+        'Issue service credentials per person and per device, time-limited, and revoke them when no longer needed.',
+        'Log every service session and make an open one visible at the device.'
+      ]
     }
   ];
+
+  /* ---------------------------------------------------------------------
+   * How each rule lines up with the FDA premarket guidance.
+   *
+   * Every finding is filed under one of the five security objectives
+   * (section IV.B), one of the eight security control categories (section
+   * V.B.1, Appendix 1) and, where it applies, the lifecycle stages a threat
+   * model is expected to capture (section V.A.1). The STRIDE letter decides
+   * the default; the tables below hold the rules that differ.
+   * ------------------------------------------------------------------- */
+  var OBJECTIVE_BY_CAT = {
+    S: 'authenticity', T: 'authenticity', R: 'authenticity',
+    I: 'confidentiality', D: 'availability', E: 'authorization'
+  };
+  var CONTROL_BY_CAT = {
+    S: 'authn', T: 'integrity', R: 'logging', I: 'confidentiality', D: 'resilience', E: 'authz'
+  };
+  var OBJECTIVE_OF = {
+    'proc-t-update-unauth': 'updatability', 'proc-t-update-none': 'updatability',
+    'proc-t-update-rollback': 'updatability', 'proc-e-unsupported': 'updatability',
+    'flow-t-code-unsigned': 'updatability', 'proc-t-sbom': 'updatability',
+    'ds-t-write': 'authorization', 'proc-i-authz': 'authorization'
+  };
+  var CONTROL_OF = {
+    'proc-t-update-unauth': 'update', 'proc-t-update-none': 'update',
+    'proc-t-update-rollback': 'update', 'proc-e-unsupported': 'update',
+    'flow-t-code-unsigned': 'update', 'proc-t-sbom': 'update',
+    'proc-i-sharedkeys': 'crypto', 'proc-i-softkeys': 'crypto',
+    'flow-t-cleartext': 'crypto', 'flow-i-cleartext': 'crypto', 'flow-t-linklayer': 'crypto',
+    'ds-i-rest': 'crypto', 'asset-i-credential': 'crypto',
+    'flow-t-replay': 'authn', 'flow-t-nointegrity': 'authn', 'safe-control-t': 'integrity',
+    'ds-t-write': 'authz', 'proc-i-authz': 'authz', 'ds-i-access': 'authn',
+    'x-flow-e-service': 'authn', 'proc-e-chain': 'integrity'
+  };
+  var LIFECYCLE_OF = {
+    'proc-t-code': ['supplyChain'],
+    'proc-t-sbom': ['supplyChain'],
+    'proc-e-unsupported': ['supplyChain', 'maintenance'],
+    'proc-i-sharedkeys': ['manufacturing', 'deployment'],
+    'proc-i-softkeys': ['manufacturing'],
+    'asset-i-credential': ['manufacturing'],
+    'x-flow-e-debug': ['manufacturing', 'deployment'],
+    'proc-i-verbose': ['deployment'],
+    'flow-t-linklayer': ['interoperation'],
+    'flow-t-nointegrity': ['interoperation'],
+    'flow-i-crossing': ['interoperation'],
+    'x-flow-s-noauth': ['interoperation'],
+    'x-flow-e-crossing': ['interoperation'],
+    'proc-t-update-unauth': ['maintenance'],
+    'proc-t-update-none': ['maintenance'],
+    'proc-t-update-rollback': ['maintenance'],
+    'flow-t-code-unsigned': ['maintenance'],
+    'x-flow-e-service': ['maintenance'],
+    'ds-i-decommission': ['decommission']
+  };
+
+  /** The FDA classification of one rule, by its id and STRIDE letter. */
+  function fdaTags(ruleId, cat) {
+    return {
+      objective: OBJECTIVE_OF[ruleId] || OBJECTIVE_BY_CAT[cat],
+      control: CONTROL_OF[ruleId] || CONTROL_BY_CAT[cat],
+      lifecycle: (LIFECYCLE_OF[ruleId] || []).slice()
+    };
+  }
 
   /* ---------------------------------------------------------------------
    * Context: exposure and impact multipliers derived from the diagram
@@ -900,7 +1129,9 @@ window.TM = window.TM || {};
       switch (val(el, 'exposure')) {
         case 'Internet-facing': return 2;
         case 'Partner / DMZ': return 2;
-        case 'Internal network': return 0;
+        /* FDA V.A.1: a hospital network is assumed hostile unless the model
+           says otherwise, so "internal" is still reachable by an adversary. */
+        case 'Internal network': return TM.assumesHostileNetwork(model) ? 1 : 0;
         case 'Isolated / offline': return 0;
         default: break;
       }
@@ -949,7 +1180,8 @@ window.TM = window.TM || {};
         sensitiveData: ctx.impact >= 2,
         externalExposure: ctx.exposureScore >= 2,
         markedAsset: !!ctx.isAsset,
-        safetyCriticalDoS: cat === 'D' && is(el, 'criticality', 'Critical (safety / life)')
+        safetyCriticalDoS: cat === 'D' && is(el, 'criticality', 'Critical (safety / life)'),
+        multiPatientHarm: is(el, 'harmScope', TM.SCOPE_MULTI)
       },
       mitigators: {
         publicData: ctx.impact === 0,
@@ -1185,8 +1417,50 @@ window.TM = window.TM || {};
       });
     });
 
+    /* -------------------------------------------------------------------
+     * FDA classification and risk treatment.
+     *
+     * The severity above is the risk as the diagram stands: pre-mitigation.
+     * A recorded treatment supplies the decision, the control, the residual
+     * (post-mitigation) risk and the evidence.
+     * ----------------------------------------------------------------- */
+    var treatments = model.treatments || {};
+    var levelRank = {};
+    profile.levels.forEach(function (lv, i) { levelRank[lv.label] = i; });
+    var acceptable = (model.meta && model.meta.acceptableResidual) || '';
+    var acceptableRank = levelRank[acceptable];
+
+    findings.forEach(function (f) {
+      var owner = TM.elementById(model, f.elementId);
+      f.fda = fdaTags(f.ruleId.split(':')[0], f.category);
+      f.multiPatient = !!owner && is(owner, 'harmScope', TM.SCOPE_MULTI);
+      f.useCases = owner ? TM.useCasesOf(owner) : [];
+
+      var t = treatments[TM.assessmentKey(f.elementId, f.ruleId)] || null;
+      f.treatment = t;
+      if (!t) {
+        /* Undecided: what remains is the whole of the risk. */
+        f.residual = { status: TM.TREATMENT_OPEN, open: true, label: f.severity.label, color: f.severity.color };
+      } else {
+        var known = levelRank[t.residual] !== undefined;
+        f.residual = {
+          status: t.status,
+          open: false,
+          label: t.residual || '',
+          color: known ? profile.levels[levelRank[t.residual]].color : '#7d8ba6',
+          exceeds: known && acceptableRank !== undefined && levelRank[t.residual] > acceptableRank,
+          needsEvidence: TM.treatmentStatus(t.status).needs === 'control' && !t.evidence
+        };
+      }
+    });
+
     /* Model-level observations. */
     var notes = [];
+    if (!TM.assumesHostileNetwork(model)) {
+      notes.push('This model assumes internal networks are trusted, so elements on them are analysed as unexposed. ' +
+        'FDA recommends the opposite assumption - that an adversary controls the network and can alter, drop and ' +
+        'replay packets - so the justification for this one belongs in the stated assumptions.');
+    }
     if (!model.nodes.some(function (n) { return n.type === 'boundary'; })) {
       notes.push('No trust boundary is drawn. STRIDE gets most of its value from what crosses a boundary - add at least one (internet edge, machine boundary, tenant, third party) and the flows crossing it will be analysed more strictly.');
     }
@@ -1318,12 +1592,197 @@ window.TM = window.TM || {};
       return TM.STRIDE_ORDER.indexOf(a.category) - TM.STRIDE_ORDER.indexOf(b.category);
     });
 
+    stats.open = findings.filter(function (f) { return f.residual.open; }).length;
+    stats.treated = findings.length - stats.open;
+
     return {
       findings: findings, gaps: gaps, notes: notes, coverage: coverage,
       stats: stats, profile: profile,
-      safetyTrace: safetyTrace, safetyGaps: safetyGaps
+      safetyTrace: safetyTrace, safetyGaps: safetyGaps,
+      fda: fdaSummary(model, elements, findings, profile, safetyGaps)
     };
   };
+
+  /* ---------------------------------------------------------------------
+   * FDA premarket alignment
+   *
+   * Everything the report needs to show how the model lines up with the
+   * guidance: findings by security objective, control category and
+   * lifecycle stage, the security architecture views, the pre- and
+   * post-mitigation risk position, and what is stated or still missing.
+   * ------------------------------------------------------------------- */
+  function fdaSummary(model, elements, findings, profile, safetyGaps) {
+    var meta = model.meta || {};
+
+    function tally(list, pick) {
+      return list.map(function (item) {
+        var hits = findings.filter(function (f) { return pick(f, item.key); });
+        return {
+          key: item.key, label: item.label, ref: item.ref || '', prompt: item.prompt || '',
+          total: hits.length,
+          open: hits.filter(function (f) { return f.residual.open; }).length
+        };
+      });
+    }
+    var objectives = tally(TM.FDA.OBJECTIVES, function (f, k) { return f.fda.objective === k; });
+    var controls = tally(TM.FDA.CONTROLS, function (f, k) { return f.fda.control === k; });
+    var lifecycle = tally(TM.FDA.LIFECYCLE, function (f, k) { return f.fda.lifecycle.indexOf(k) !== -1; });
+    lifecycle.forEach(function (row) {
+      row.notes = String((meta.lifecycle && meta.lifecycle[row.key]) || '').trim();
+    });
+
+    function brief(el) { return { id: el.id, label: TM.label(el), type: el.type }; }
+    function of(el) { return findings.filter(function (f) { return f.elementId === el.id; }); }
+
+    /* ---- multi-patient harm view ---- */
+    var multiEls = elements.filter(function (el) { return is(el, 'harmScope', TM.SCOPE_MULTI); });
+    var multiPatient = {
+      elements: multiEls.map(function (el) {
+        var b = brief(el);
+        b.findings = of(el).length;
+        b.safety = TM.safetyFunctionsOf(el);
+        b.harmSeverity = val(el, 'harmSeverity');
+        b.controls = (el.existingControls || '').trim();
+        return b;
+      }),
+      findings: findings.filter(function (f) { return f.multiPatient; }),
+      unanswered: elements.filter(function (el) { return unset(el, 'harmScope'); }).map(brief)
+    };
+
+    /* ---- updatability and patchability view ---- */
+    var processes = elements.filter(function (el) { return el.type === 'process'; });
+    var update = {
+      processes: processes.map(function (el) {
+        var b = brief(el);
+        b.mechanism = val(el, 'updateMechanism');
+        b.origin = val(el, 'softwareOrigin');
+        b.support = val(el, 'componentSupport');
+        b.sbomRef = String((el.props && el.props.sbomRef) || '').trim();
+        return b;
+      }),
+      flows: model.flows.filter(function (f) { return has(f, 'carries', 'code'); }).map(function (f) {
+        var b = brief(f);
+        b.from = TM.label(TM.nodeById(model, f.from));
+        b.to = TM.label(TM.nodeById(model, f.to));
+        b.protocol = val(f, 'protocol');
+        b.integrity = val(f, 'flowIntegrity');
+        b.authentication = val(f, 'authentication');
+        b.crossings = TM.boundariesCrossed(model, f).map(function (x) { return TM.label(x); });
+        return b;
+      }),
+      findings: findings.filter(function (f) { return f.fda.objective === 'updatability'; })
+    };
+    update.modelled = update.flows.length > 0 ||
+      update.processes.some(function (p) { return !TM.isUnset(p.mechanism); });
+
+    /* ---- security use case views ---- */
+    var caseIndex = {}, caseOrder = [];
+    elements.forEach(function (el) {
+      TM.useCasesOf(el).forEach(function (name) {
+        var k = name.toLowerCase();
+        if (!caseIndex[k]) { caseIndex[k] = { name: name, elements: [], findings: [], safety: {} }; caseOrder.push(k); }
+        caseIndex[k].elements.push(brief(el));
+        caseIndex[k].findings = caseIndex[k].findings.concat(of(el));
+        TM.safetyFunctionsOf(el).forEach(function (fn) { caseIndex[k].safety[fn] = true; });
+      });
+    });
+    var useCases = caseOrder.map(function (k) {
+      var c = caseIndex[k];
+      c.safety = Object.keys(c.safety);
+      return c;
+    });
+    /* FDA asks for a use case view for all functionality through which a
+       compromise could affect safety or effectiveness. */
+    var uncovered = elements.filter(function (el) {
+      return TM.hasSafetyRole(el) && !TM.useCasesOf(el).length;
+    }).map(brief);
+
+    /* ---- pre- and post-mitigation risk ---- */
+    var byStatus = {};
+    byStatus[TM.TREATMENT_OPEN] = 0;
+    TM.TREATMENT_STATUSES.forEach(function (st) { byStatus[st.label] = 0; });
+    var residualByLevel = {};
+    profile.levels.forEach(function (lv) { residualByLevel[lv.label] = 0; });
+    findings.forEach(function (f) {
+      byStatus[f.residual.status] = (byStatus[f.residual.status] || 0) + 1;
+      if (!f.residual.open && f.residual.label && residualByLevel[f.residual.label] !== undefined) {
+        residualByLevel[f.residual.label] += 1;
+      }
+    });
+    var risk = {
+      total: findings.length,
+      open: findings.filter(function (f) { return f.residual.open; }).length,
+      byStatus: byStatus,
+      residualByLevel: residualByLevel,
+      acceptable: meta.acceptableResidual || '',
+      acceptableKnown: profile.levels.some(function (lv) { return lv.label === meta.acceptableResidual; }),
+      exceeding: findings.filter(function (f) { return f.residual.exceeds; }),
+      needsEvidence: findings.filter(function (f) { return f.residual.needsEvidence; })
+    };
+    risk.treated = risk.total - risk.open;
+
+    /* ---- what the model states, and what is still missing ---- */
+    function said(text) { return String(text || '').trim() !== ''; }
+    var doc = [];
+    function check(item, ref, ok, detail) {
+      doc.push({ item: item, ref: ref, status: ok === true ? 'ok' : (ok === false ? 'missing' : ok), detail: detail });
+    }
+    var stagesCovered = lifecycle.filter(function (l) { return l.notes || l.total; }).length;
+    var withSbom = update.processes.filter(function (p) { return p.sbomRef; }).length;
+    var boundaries = model.nodes.filter(function (n) { return n.type === 'boundary'; }).length;
+
+    check('Intended use', 'IV.B', said(meta.intendedUse),
+      said(meta.intendedUse) ? 'Stated.' : 'Not stated. Every judgement about patient harm is made against it.');
+    check('Environment of use', 'IV.B', said(meta.environment),
+      said(meta.environment) ? 'Stated.' : 'Not stated. Describe where the device is used, and the least secure environment it is expected to meet.');
+    check('Assumptions about the system and its environment', 'V.A.1', said(meta.assumptions),
+      said(meta.assumptions) ? 'Stated.' : 'Not stated. A threat model without its assumptions cannot be reviewed.');
+    check('Network assumed hostile', 'V.A.1', TM.assumesHostileNetwork(model) ? true : 'partial',
+      TM.assumesHostileNetwork(model)
+        ? 'Analysed on the assumption that an adversary can alter, drop and replay traffic.'
+        : 'Internal networks are assumed trusted. FDA recommends assuming the opposite; justify this in the assumptions.');
+    check('Rationale for the threat modeling methodology', 'V.A.1', said(meta.methodologyRationale),
+      said(meta.methodologyRationale) ? 'Stated.' : 'Not stated. Say why STRIDE per element suits this device, and what it was combined with.');
+    check('Trust boundaries and security context', 'V.B', boundaries > 0,
+      boundaries ? boundaries + ' drawn.' : 'No trust boundary is drawn.');
+    check('Lifecycle risks beyond the design', 'V.A.1', stagesCovered === lifecycle.length ? true : (stagesCovered ? 'partial' : false),
+      stagesCovered + ' of ' + lifecycle.length + ' lifecycle stages have a recorded consideration or a threat raised.');
+    check('Risk acceptance criteria', 'V.A.2', said(meta.acceptanceCriteria) && risk.acceptableKnown ? true : (said(meta.acceptanceCriteria) || risk.acceptableKnown ? 'partial' : false),
+      risk.acceptableKnown
+        ? 'Residual risk up to "' + meta.acceptableResidual + '" is acceptable' + (said(meta.acceptanceCriteria) ? '.' : ', but the criteria are not described.')
+        : 'No acceptable level of residual risk is set, so residual risks cannot be judged.');
+    check('Pre- and post-mitigation risk for every threat', 'V.A.2', !risk.total ? 'partial' : (risk.open === 0 ? true : (risk.treated ? 'partial' : false)),
+      risk.treated + ' of ' + risk.total + ' threats have a recorded decision and residual risk; ' + risk.open + ' are open.');
+    check('Controls traced to test evidence', 'V.C', !risk.treated ? 'partial' : (risk.needsEvidence.length ? 'partial' : true),
+      risk.needsEvidence.length
+        ? risk.needsEvidence.length + ' mitigated ' + (risk.needsEvidence.length === 1 ? 'threat has' : 'threats have') + ' no verification evidence referenced.'
+        : (risk.treated ? 'Every mitigated threat references its verification evidence.' : 'No mitigations recorded yet.'));
+    check('Security risks traced into the safety risk assessment', 'V.A.2', !safetyGaps.length,
+      safetyGaps.length
+        ? safetyGaps.length + (safetyGaps.length === 1 ? ' break' : ' breaks') + ' in the safety trace (section 5.2).'
+        : 'No breaks in the safety trace.');
+    check('Multi-patient harm view', 'V.B.2(b)', multiPatient.unanswered.length ? 'partial' : true,
+      multiPatient.unanswered.length
+        ? 'Scale of compromise is not answered for ' + multiPatient.unanswered.length + ' elements.'
+        : multiPatient.elements.length + ' elements can affect multiple devices or patients at once.');
+    check('Updatability and patchability view', 'V.B.2(c)', update.modelled,
+      update.modelled
+        ? update.flows.length + ' code-carrying ' + (update.flows.length === 1 ? 'path' : 'paths') + ' modelled.'
+        : 'No update path is modelled: no flow carries code and no process states how it is updated. Draw it, or explain why the device has none.');
+    check('Security use case views', 'V.B.2(d)', !useCases.length ? false : (uncovered.length ? 'partial' : true),
+      !useCases.length
+        ? 'No element is tagged with a security use case.'
+        : useCases.length + ' use ' + (useCases.length === 1 ? 'case' : 'cases') + ' defined' +
+          (uncovered.length ? '; ' + uncovered.length + ' safety-relevant elements belong to none.' : '.'));
+    check('Software traced to the SBOM', 'V.A.4, Appendix 2', !processes.length ? 'partial' : (withSbom === processes.length ? true : (withSbom ? 'partial' : false)),
+      withSbom + ' of ' + processes.length + ' processes reference an SBOM entry.');
+
+    return {
+      objectives: objectives, controls: controls, lifecycle: lifecycle,
+      views: { multiPatient: multiPatient, update: update, useCases: useCases, uncovered: uncovered },
+      risk: risk, documentation: doc
+    };
+  }
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function pad3(n) { return (n < 10 ? '00' : n < 100 ? '0' : '') + n; }
