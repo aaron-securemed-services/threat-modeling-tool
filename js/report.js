@@ -128,6 +128,13 @@ window.TM = window.TM || {};
     }
     out.push('</dl>');
 
+    /* The diagram itself, as an image that scales to the width of the page,
+       so a printed or downloaded report carries the picture it describes. */
+    if (opts.diagramSVG) {
+      out.push('<figure class="report-diagram"><img alt="Data flow diagram of ' + esc(name) + '" src="data:image/svg+xml;charset=utf-8,' +
+        encodeURIComponent(opts.diagramSVG) + '"></figure>');
+    }
+
     /* ---- summary ---- */
     out.push('<h2>1. Summary</h2>');
     out.push('<p>The diagram contains <b>' + a.stats.elements + '</b> analysed ' +
@@ -940,6 +947,8 @@ window.TM = window.TM || {};
     '.cvss-current code{background:#f2f5fa;padding:1px 5px;border-radius:3px;font-size:11px}',
     '.cvss-box{margin-top:7px;padding-top:6px;border-top:1px dashed #d3d9e4;font-size:12.5px}',
     '.fda-tags{font-size:11.5px;margin-top:3px}',
+    '.report-diagram{margin:14px 0;text-align:center;break-inside:avoid;page-break-inside:avoid}',
+    '.report-diagram img{display:block;margin:0 auto;max-width:100%;max-height:165mm;height:auto;border:1px solid #d3d9e4;border-radius:4px}',
     '.doc-ok{color:#1f5c36;font-weight:600}.doc-partial{color:#96520a;font-weight:600}.doc-missing{color:#c62828;font-weight:600}'
   ].join('');
 
