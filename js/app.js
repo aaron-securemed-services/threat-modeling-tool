@@ -288,7 +288,7 @@
     });
     $('btnReportHtml').addEventListener('click', function () {
       var r = state.lastReport;
-      var doc = TM.reportDocument(TM.buildReportHTML(r.model, r.analysis),
+      var doc = TM.reportDocument(TM.buildReportHTML(r.model, r.analysis, { diagramSVG: diagramForReport() }),
         (r.model.meta.name || 'Threat model') + ' — STRIDE report', TM.REPORT_CSS);
       download(slug(state.model.meta.name || 'threat-model') + '-stride-report.html', doc, 'text/html');
     });
@@ -929,7 +929,8 @@
     var scrollTop = opts.keepScroll ? $('reportContent').scrollTop : 0;
     var analysis = TM.analyze(state.model);
     state.lastReport = { model: state.model, analysis: analysis };
-    $('reportContent').innerHTML = TM.buildReportHTML(state.model, analysis, { interactive: true });
+    $('reportContent').innerHTML = TM.buildReportHTML(state.model, analysis,
+      { interactive: true, diagramSVG: diagramForReport() });
     $('reportModal').hidden = false;
     $('reportContent').scrollTop = scrollTop;
     if (opts.openTreatKey) {
@@ -947,6 +948,14 @@
       }
     }
     status(analysis.stats.total + ' ' + (analysis.stats.total === 1 ? 'threat' : 'threats') + ' identified.');
+  }
+
+  /** The diagram as a standalone SVG for the report, or '' when there is nothing drawn. */
+  function diagramForReport() {
+    if (!state.model.nodes.length) return '';
+    try {
+      return state.diagram.exportSVGString({ legend: $('chkLegend').checked });
+    } catch (e) { return ''; }
   }
 
   function cssEscape(s) { return String(s).replace(/["\\]/g, '\\$&'); }

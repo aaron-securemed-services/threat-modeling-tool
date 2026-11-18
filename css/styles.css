@@ -605,8 +605,21 @@ button::-moz-focus-inner { border: 0; padding: 0; }
 #helpContent th, #helpContent td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
 #helpContent th { background: #f2f5fa; }
 
+.report-diagram { margin: 14px 0; text-align: center; }
+.report-diagram img {
+  display: block; margin: 0 auto; max-width: 100%; height: auto;
+  border: 1px solid var(--line); border-radius: 4px; background: #fff;
+}
+
 @media print {
-  .app-bar, .palette, .props, .status-bar, .modal-head { display: none !important; }
+  /* Only the report prints: the canvas behind it is a viewport onto the
+     diagram and would be cut off at the page edge. The report carries its
+     own copy of the diagram, scaled to fit the page. */
+  .app-bar, .layout, .modal-head, .modal[hidden],
+  .cvss-toggle, .cvss-form { display: none !important; }
+  html, body { height: auto !important; overflow: visible !important; }
+  .report-diagram { break-inside: avoid; page-break-inside: avoid; }
+  .report-diagram img { max-height: 165mm; }
   .modal { position: static; background: #fff; padding: 0; }
   .modal-box { box-shadow: none; max-height: none; width: 100%; }
   .modal-content { overflow: visible; padding: 0; }
